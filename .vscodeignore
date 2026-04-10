@@ -1,0 +1,8 @@
+.git/**
+.github/**
+.vscode/**
+out/test/**
+src/**
+scripts/**
+tsconfig.json
+*.tsbuildinfo

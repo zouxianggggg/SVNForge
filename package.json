@@ -1,0 +1,351 @@
+{
+  "name": "svnlens",
+  "displayName": "SVNLens",
+  "description": "A feature-rich Apache Subversion extension for Visual Studio Code.",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0A5F52",
+    "theme": "dark"
+  },
+  "markdown": "github",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "SCM",
+    "Other"
+  ],
+  "keywords": [
+    "svn",
+    "subversion",
+    "scm",
+    "history",
+    "blame",
+    "log"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:.svn",
+    "onView:svnLens.repoBrowser",
+    "onView:svnLens.branches",
+    "onCommand:svnLens.checkout",
+    "onCommand:svnLens.import",
+    "onCommand:svnLens.refresh",
+    "onCommand:svnLens.update",
+    "onCommand:svnLens.commit",
+    "onCommand:svnLens.switch",
+    "onCommand:svnLens.showLog",
+    "onCommand:svnLens.showFileHistory",
+    "onCommand:svnLens.toggleBlame"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "SVNLens",
+      "properties": {
+        "svnLens.svnPath": {
+          "type": "string",
+          "default": "svn",
+          "description": "Path to the svn executable."
+        },
+        "svnLens.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh SVN state when files or workspace folders change."
+        },
+        "svnLens.refreshDebounceMs": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 300,
+          "description": "Debounce duration for background refreshes."
+        },
+        "svnLens.logPageSize": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Default page size for log and file history queries."
+        },
+        "svnLens.enableBlameDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline blame decorations in the editor."
+        },
+        "svnLens.commitMessagePattern": {
+          "type": "string",
+          "default": "",
+          "description": "Optional regular expression that commit messages must satisfy."
+        },
+        "svnLens.preCommitCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shell command executed before commit. Non-zero exit code blocks commit."
+        },
+        "svnLens.defaultBranchRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "trunk",
+            "branches",
+            "tags"
+          ],
+          "description": "Repository root folders used when browsing SVN branches and tags."
+        },
+        "svnLens.jenkins.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Jenkins base URL for branch build status lookup."
+        },
+        "svnLens.jenkins.jobPathTemplate": {
+          "type": "string",
+          "default": "job/{branch}/api/json",
+          "description": "Jenkins API path template. Use {branch} placeholder."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "svnLens",
+          "title": "SVN",
+          "icon": "$(source-control)"
+        }
+      ]
+    },
+    "views": {
+      "svnLens": [
+        {
+          "id": "svnLens.repoBrowser",
+          "name": "Repository Browser"
+        },
+        {
+          "id": "svnLens.branches",
+          "name": "Branches & Tags"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "svnLens.checkout",
+        "title": "SVN: Checkout"
+      },
+      {
+        "command": "svnLens.import",
+        "title": "SVN: Import"
+      },
+      {
+        "command": "svnLens.refresh",
+        "title": "SVN: Refresh"
+      },
+      {
+        "command": "svnLens.update",
+        "title": "SVN: Update"
+      },
+      {
+        "command": "svnLens.commit",
+        "title": "SVN: Commit"
+      },
+      {
+        "command": "svnLens.switch",
+        "title": "SVN: Switch"
+      },
+      {
+        "command": "svnLens.showInfo",
+        "title": "SVN: Show Repository Info"
+      },
+      {
+        "command": "svnLens.showLog",
+        "title": "SVN: Show Log"
+      },
+      {
+        "command": "svnLens.showGraph",
+        "title": "SVN: Show Commit Graph"
+      },
+      {
+        "command": "svnLens.showFileHistory",
+        "title": "SVN: Show File History"
+      },
+      {
+        "command": "svnLens.compareRevisions",
+        "title": "SVN: Compare Revisions"
+      },
+      {
+        "command": "svnLens.openDiff",
+        "title": "SVN: Open Diff"
+      },
+      {
+        "command": "svnLens.exportPatch",
+        "title": "SVN: Export Patch"
+      },
+      {
+        "command": "svnLens.applyPatch",
+        "title": "SVN: Apply Patch"
+      },
+      {
+        "command": "svnLens.manageIgnore",
+        "title": "SVN: Manage svn:ignore"
+      },
+      {
+        "command": "svnLens.openRepoBrowser",
+        "title": "SVN: Open Repository Browser"
+      },
+      {
+        "command": "svnLens.resetRepoBrowserRoot",
+        "title": "SVN: Reset Repository Browser Root"
+      },
+      {
+        "command": "svnLens.openRemoteItem",
+        "title": "SVN: Open Remote Item"
+      },
+      {
+        "command": "svnLens.createBranch",
+        "title": "SVN: Create Branch"
+      },
+      {
+        "command": "svnLens.createTag",
+        "title": "SVN: Create Tag"
+      },
+      {
+        "command": "svnLens.mergeBranch",
+        "title": "SVN: Merge Branch"
+      },
+      {
+        "command": "svnLens.toggleBlame",
+        "title": "SVN: Toggle Blame"
+      },
+      {
+        "command": "svnLens.acceptMine",
+        "title": "SVN: Accept Mine"
+      },
+      {
+        "command": "svnLens.acceptTheirs",
+        "title": "SVN: Accept Theirs"
+      },
+      {
+        "command": "svnLens.markResolved",
+        "title": "SVN: Mark Resolved"
+      },
+      {
+        "command": "svnLens.openConflictDiff",
+        "title": "SVN: Open Conflict Diff"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "svnLens.toggleBlame",
+          "when": "resourceScheme == file",
+          "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "navigation@2"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "svnLens.refresh",
+          "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.update",
+          "group": "navigation@2"
+        },
+        {
+          "command": "svnLens.showLog",
+          "group": "navigation@3"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "svnLens.openDiff",
+          "when": "scmProvider == svnLens && scmResourceState =~ /modified|added|deleted|conflicted/",
+          "group": "inline@1"
+        },
+        {
+          "command": "svnLens.openConflictDiff",
+          "when": "scmProvider == svnLens && scmResourceState == conflicted",
+          "group": "inline@2"
+        },
+        {
+          "command": "svnLens.acceptMine",
+          "when": "scmProvider == svnLens && scmResourceState == conflicted",
+          "group": "inline@3"
+        },
+        {
+          "command": "svnLens.acceptTheirs",
+          "when": "scmProvider == svnLens && scmResourceState == conflicted",
+          "group": "inline@4"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "svnLens.refresh",
+          "when": "view == svnLens.repoBrowser || view == svnLens.branches",
+          "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.openRepoBrowser",
+          "when": "view == svnLens.repoBrowser",
+          "group": "navigation@2"
+        },
+        {
+          "command": "svnLens.resetRepoBrowserRoot",
+          "when": "view == svnLens.repoBrowser",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "svnLens.openRemoteItem",
+          "when": "view == svnLens.repoBrowser && viewItem == remoteFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "svnLens.createBranch",
+          "when": "view == svnLens.branches && viewItem == repositoryRoot",
+          "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.createTag",
+          "when": "view == svnLens.branches && viewItem == repositoryRoot",
+          "group": "navigation@2"
+        },
+        {
+          "command": "svnLens.mergeBranch",
+          "when": "view == svnLens.branches && viewItem == branchItem",
+          "group": "navigation@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node ./out/test/runTest.js",
+    "vscode:prepublish": "npm run compile",
+    "package:vsix": "npm run compile && vsce package --no-yarn --allow-missing-repository",
+    "publish:dry-run": "npm run compile && vsce package --no-yarn --allow-missing-repository",
+    "smoke:svn": "bash ./scripts/smoke-svn.sh"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.2.5",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2",
+    "@vscode/test-electron": "^2.5.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.15.2",
+    "@types/sql.js": "^1.4.11",
+    "@types/vscode": "^1.96.0",
+    "mocha": "^11.1.0",
+    "typescript": "^5.8.3"
+  }
+}
