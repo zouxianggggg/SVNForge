@@ -1,0 +1,41 @@
+<svg width="1280" height="760" viewBox="0 0 1280 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="760" rx="28" fill="#111827"/>
+  <rect x="34" y="34" width="1212" height="692" rx="26" fill="#0F172A" stroke="#23324B"/>
+  <rect x="70" y="72" width="1140" height="108" rx="24" fill="#162033" stroke="#24324C"/>
+  <text x="102" y="126" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="42" font-weight="700">SVNForge Workspace Dashboard</text>
+  <text x="104" y="156" fill="#94A3B8" font-family="Avenir Next, Segoe UI, sans-serif" font-size="22">trunk • r154 • remote browser + recent graph</text>
+  <rect x="1060" y="102" width="116" height="42" rx="14" fill="#172554"/>
+  <text x="1092" y="130" fill="#DBEAFE" font-family="Avenir Next, Segoe UI, sans-serif" font-size="24" font-weight="700">r154</text>
+  <rect x="70" y="212" width="492" height="468" rx="24" fill="#121C2F" stroke="#24324C"/>
+  <rect x="594" y="212" width="616" height="468" rx="24" fill="#121C2F" stroke="#24324C"/>
+  <text x="102" y="258" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="28" font-weight="700">Remote Browser</text>
+  <text x="626" y="258" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="28" font-weight="700">Recent Graph</text>
+  <rect x="102" y="284" width="290" height="48" rx="12" fill="#0B1220" stroke="#2D3E5E"/>
+  <rect x="406" y="284" width="70" height="48" rx="12" fill="#0B1220" stroke="#2D3E5E"/>
+  <rect x="490" y="284" width="70" height="48" rx="12" fill="#0B1220" stroke="#2D3E5E"/>
+  <text x="122" y="315" fill="#CBD5E1" font-family="Avenir Next, Segoe UI, sans-serif" font-size="18">branches/release-1.0</text>
+  <text x="430" y="315" fill="#CBD5E1" font-family="Avenir Next, Segoe UI, sans-serif" font-size="18">Up</text>
+  <text x="500" y="315" fill="#CBD5E1" font-family="Avenir Next, Segoe UI, sans-serif" font-size="18">Refresh</text>
+  <rect x="102" y="364" width="428" height="70" rx="16" fill="#0B1220" stroke="#24324C"/>
+  <rect x="102" y="452" width="428" height="70" rx="16" fill="#0B1220" stroke="#24324C"/>
+  <rect x="102" y="540" width="428" height="70" rx="16" fill="#0B1220" stroke="#24324C"/>
+  <text x="130" y="405" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="21" font-weight="600">src/</text>
+  <text x="130" y="493" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="21" font-weight="600">README.md</text>
+  <text x="130" y="581" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="21" font-weight="600">tags/</text>
+  <rect x="432" y="380" width="78" height="38" rx="11" fill="#1D4ED8"/>
+  <rect x="432" y="468" width="78" height="38" rx="11" fill="#1F2937" stroke="#334155"/>
+  <rect x="432" y="556" width="78" height="38" rx="11" fill="#1D4ED8"/>
+  <text x="450" y="404" fill="#EFF6FF" font-family="Avenir Next, Segoe UI, sans-serif" font-size="16" font-weight="600">Browse</text>
+  <text x="456" y="492" fill="#CBD5E1" font-family="Avenir Next, Segoe UI, sans-serif" font-size="16">Open</text>
+  <text x="450" y="580" fill="#EFF6FF" font-family="Avenir Next, Segoe UI, sans-serif" font-size="16" font-weight="600">Browse</text>
+  <circle cx="648" cy="334" r="8" fill="#5EE0C2"/>
+  <circle cx="648" cy="426" r="8" fill="#FF8A3D"/>
+  <circle cx="648" cy="518" r="8" fill="#7DD3FC"/>
+  <path d="M648 334V518" stroke="#334155" stroke-width="4" stroke-linecap="round"/>
+  <text x="676" y="340" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="22" font-weight="600">r154 · Merge release fixes</text>
+  <text x="676" y="368" fill="#94A3B8" font-family="Avenir Next, Segoe UI, sans-serif" font-size="17">A branches/release-1.0/src/providers/historyPanel.ts</text>
+  <text x="676" y="432" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="22" font-weight="600">r151 · Dashboard polish</text>
+  <text x="676" y="460" fill="#94A3B8" font-family="Avenir Next, Segoe UI, sans-serif" font-size="17">M trunk/src/providers/repositoryDashboardPanel.ts</text>
+  <text x="676" y="524" fill="#F8FAFC" font-family="Avenir Next, Segoe UI, sans-serif" font-size="22" font-weight="600">r149 · Conflict actions</text>
+  <text x="676" y="552" fill="#94A3B8" font-family="Avenir Next, Segoe UI, sans-serif" font-size="17">C trunk/src/services/svnRepository.ts</text>
+</svg>

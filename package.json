@@ -2,6 +2,14 @@
   "name": "svnforge",
   "displayName": "SVNForge",
   "description": "A feature-rich Apache Subversion extension for Visual Studio Code with blame, history, repo browsing, and branch-aware workflows.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zouxianggggg/SVNForge.git"
+  },
+  "homepage": "https://github.com/zouxianggggg/SVNForge#readme",
+  "bugs": {
+    "url": "https://github.com/zouxianggggg/SVNForge/issues"
+  },
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#162033",

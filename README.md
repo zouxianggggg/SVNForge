@@ -1,6 +1,23 @@
 # SVNForge
 
+[![CI](https://github.com/zouxianggggg/SVNForge/actions/workflows/ci.yml/badge.svg)](https://github.com/zouxianggggg/SVNForge/actions/workflows/ci.yml)
+[![Publish](https://github.com/zouxianggggg/SVNForge/actions/workflows/publish.yml/badge.svg)](https://github.com/zouxianggggg/SVNForge/actions/workflows/publish.yml)
+[![VSIX](https://img.shields.io/badge/VSIX-ready-1D4ED8)](https://github.com/zouxianggggg/SVNForge)
+
+![SVNForge Hero](media/github-hero.svg)
+
 SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强调分支可视化、源码内责任追踪和远程仓库浏览，目标是提供接近 Git 原生体验的 SVN 工作流。
+
+## 预览
+
+![SVNForge Dashboard Preview](media/dashboard-preview.svg)
+
+核心界面包含：
+
+- Source Control 集成：显示 SVN 状态、diff、提交入口和冲突操作
+- Inline blame：在源码中直接看到行级责任信息，并通过 hover 查看 revision 详情
+- Repository Dashboard：在同一个工作台中浏览远程仓库结构和近期提交图谱
+- File History / Graph：查看文件级历史、按提交筛选日志和 revision 对比
 
 当前版本已经实现以下能力：
 
@@ -26,6 +43,13 @@ SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强�
 2. 运行 `npm run compile`
 3. 在 VS Code 中按 `F5` 启动扩展开发宿主
 
+## 快速开始
+
+1. 在 Extensions 开发宿主中打开一个 SVN working copy
+2. 在 Source Control 面板中查看文件状态并输入提交信息
+3. 使用命令面板运行 `SVN: Show Log`、`SVN: Show File History`、`SVN: Open Repository Browser`
+4. 在编辑器标题栏启用 blame，并通过 hover 查看每一行对应的 revision / author / message
+
 ### 调试
 
 - `Run SVNForge`：先编译，再启动扩展开发宿主
@@ -44,6 +68,25 @@ SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强�
 - 在 Linux 环境中安装 Subversion 后执行 compile、extension host tests、smoke tests 和 VSIX 打包
 - `.github/workflows/publish.yml` 支持 tag 发布和手动触发发布
 - 发布到 VS Code Marketplace 需要配置仓库 secret：`VSCE_PAT`
+
+### GitHub Topics 建议
+
+建议在 GitHub 仓库页面手动添加这些 topics：
+
+- `svn`
+- `subversion`
+- `vscode-extension`
+- `source-control`
+- `typescript`
+
+### VS Code Marketplace Secret
+
+要让 GitHub Actions 自动发布到 VS Code Marketplace：
+
+1. 打开仓库的 GitHub Actions secrets 页面
+2. 新建仓库 secret：`VSCE_PAT`
+3. 将你从 Visual Studio Marketplace 生成的 Personal Access Token 填入该 secret
+4. 推送 `v*` tag 或手动触发 `publish` workflow
 
 ## 架构
 
