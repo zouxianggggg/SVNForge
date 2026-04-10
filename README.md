@@ -4,13 +4,13 @@
 [![Publish](https://github.com/zouxianggggg/SVNForge/actions/workflows/publish.yml/badge.svg)](https://github.com/zouxianggggg/SVNForge/actions/workflows/publish.yml)
 [![VSIX](https://img.shields.io/badge/VSIX-ready-1D4ED8)](https://github.com/zouxianggggg/SVNForge)
 
-![SVNForge Hero](media/github-hero.svg)
+![SVNForge Hero](media/github-hero.png)
 
 SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强调分支可视化、源码内责任追踪和远程仓库浏览，目标是提供接近 Git 原生体验的 SVN 工作流。
 
 ## 预览
 
-![SVNForge Dashboard Preview](media/dashboard-preview.svg)
+![SVNForge Dashboard Preview](media/dashboard-preview.png)
 
 核心界面包含：
 
