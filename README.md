@@ -50,7 +50,7 @@ SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强�
 3. 使用命令面板运行 `SVN: Show Log`、`SVN: Show File History`、`SVN: Open Repository Browser`
 4. 在编辑器标题栏启用 blame，并通过 hover 查看每一行对应的 revision / author / message
 
-### 调试
+<!-- ### 调试
 
 - `Run SVNForge`：先编译，再启动扩展开发宿主
 - `Run SVNForge Watch`：启动 `tsc -watch` 后运行扩展宿主
@@ -87,7 +87,7 @@ SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强�
 2. 新建仓库 secret：`VSCE_PAT`
 3. 将你从 Visual Studio Marketplace 生成的 Personal Access Token 填入该 secret
 4. 推送 `v*` tag 或手动触发 `publish` workflow
-
+ -->
 ## 架构
 
 - UI 层：SCM 资源组、树视图、状态栏、Webview 面板、blame/冲突装饰
