@@ -1,6 +1,6 @@
-# SVNLens
+# SVNForge
 
-SVNLens 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，目标是提供接近 Git 原生体验的 SVN 工作流，并补齐日志、分支、远程浏览、冲突处理和逐行追踪等高级能力。
+SVNForge 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，强调分支可视化、源码内责任追踪和远程仓库浏览，目标是提供接近 Git 原生体验的 SVN 工作流。
 
 当前版本已经实现以下能力：
 
@@ -28,8 +28,8 @@ SVNLens 是一个面向 Visual Studio Code 的 Apache Subversion 扩展，目标
 
 ### 调试
 
-- `Run SVNLens`：先编译，再启动扩展开发宿主
-- `Run SVNLens Watch`：启动 `tsc -watch` 后运行扩展宿主
+- `Run SVNForge`：先编译，再启动扩展开发宿主
+- `Run SVNForge Watch`：启动 `tsc -watch` 后运行扩展宿主
 - `npm run smoke:svn`：创建临时本地仓库，执行 checkout、commit、branch、switch、merge、ignore、patch 等真实 SVN 命令烟测
 - `npm test`：启动 VS Code 扩展宿主并执行自动化集成测试
 

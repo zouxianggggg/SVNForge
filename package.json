@@ -1,10 +1,10 @@
 {
-  "name": "svnlens",
-  "displayName": "SVNLens",
-  "description": "A feature-rich Apache Subversion extension for Visual Studio Code.",
+  "name": "svnforge",
+  "displayName": "SVNForge",
+  "description": "A feature-rich Apache Subversion extension for Visual Studio Code with blame, history, repo browsing, and branch-aware workflows.",
   "icon": "media/icon.png",
   "galleryBanner": {
-    "color": "#0A5F52",
+    "color": "#162033",
     "theme": "dark"
   },
   "markdown": "github",
@@ -44,7 +44,7 @@
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "SVNLens",
+      "title": "SVNForge",
       "properties": {
         "svnLens.svnPath": {
           "type": "string",

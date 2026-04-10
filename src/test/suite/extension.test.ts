@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SVNLensApi } from '../../api';
 
-const extensionId = 'local.svnlens';
+const extensionId = 'local.svnforge';
 
 function getWorkingCopyPath(): string {
   const value = process.env.SVNLENS_TEST_WORKING_COPY;
@@ -57,7 +57,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
   throw new Error('Condition not satisfied within timeout.');
 }
 
-suite('SVNLens Extension Host', () => {
+suite('SVNForge Extension Host', () => {
   const workingCopyPath = getWorkingCopyPath();
   const secondWorkingCopyPath = getSecondWorkingCopyPath();
   const filePath = path.join(workingCopyPath, 'app.txt');
