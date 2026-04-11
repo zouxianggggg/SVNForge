@@ -44,6 +44,7 @@ export interface SvnLogEntry {
   date: string;
   message: string;
   changedPaths: SvnChangedPath[];
+  detailsLoaded?: boolean;
   cached?: boolean;
 }
 

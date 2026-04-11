@@ -16,6 +16,44 @@ function deserializePaths(value: string): SvnLogEntry['changedPaths'] {
   }
 }
 
+function normalizeDetailsLoaded(value: unknown, fallback = false): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    return value === '1' || value.toLowerCase() === 'true';
+  }
+  return fallback;
+}
+
+function mergeLogEntry(existing: SvnLogEntry | undefined, incoming: SvnLogEntry): SvnLogEntry {
+  if (!existing) {
+    return incoming;
+  }
+
+  if (existing.detailsLoaded && !incoming.detailsLoaded) {
+    return {
+      ...incoming,
+      changedPaths: existing.changedPaths,
+      detailsLoaded: true,
+    };
+  }
+
+  if (!existing.detailsLoaded && incoming.detailsLoaded) {
+    return incoming;
+  }
+
+  return {
+    ...existing,
+    ...incoming,
+    changedPaths: incoming.changedPaths.length > 0 ? incoming.changedPaths : existing.changedPaths,
+    detailsLoaded: normalizeDetailsLoaded(incoming.detailsLoaded, normalizeDetailsLoaded(existing.detailsLoaded, false)),
+  };
+}
+
 export class LogCache implements vscode.Disposable {
   private database: Database | undefined;
   private sql: SqlJsStatic | undefined;
@@ -44,18 +82,25 @@ export class LogCache implements vscode.Disposable {
       try {
         this.database.run('BEGIN');
         const statement = this.database.prepare(
-          'INSERT OR REPLACE INTO logs (scope_id, revision, author, date, message, changed_paths) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO logs (scope_id, revision, author, date, message, changed_paths, details_loaded) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        );
+        const selectStatement = this.database.prepare(
+          'SELECT revision, author, date, message, changed_paths, details_loaded FROM logs WHERE scope_id = ? AND revision = ? LIMIT 1',
         );
         for (const entry of entries) {
+          const existing = this.readExistingEntry(selectStatement, scopeId, entry.revision);
+          const merged = mergeLogEntry(existing, entry);
           statement.run([
             scopeId,
-            entry.revision,
-            entry.author,
-            entry.date,
-            entry.message,
-            serializePaths(entry),
+            merged.revision,
+            merged.author,
+            merged.date,
+            merged.message,
+            serializePaths(merged),
+            merged.detailsLoaded ? 1 : 0,
           ]);
         }
+        selectStatement.free();
         statement.free();
         this.database.run('COMMIT');
         this.schedulePersist();
@@ -72,7 +117,7 @@ export class LogCache implements vscode.Disposable {
 
     const bucket = this.getFallbackBucket(scopeId);
     for (const entry of entries) {
-      bucket.set(entry.revision, entry);
+      bucket.set(entry.revision, mergeLogEntry(bucket.get(entry.revision), entry));
     }
   }
 
@@ -104,7 +149,7 @@ export class LogCache implements vscode.Disposable {
     if (this.database) {
       try {
         const statement = this.database.prepare(
-          'SELECT revision, author, date, message, changed_paths FROM logs WHERE scope_id = ? AND revision = ? LIMIT 1',
+          'SELECT revision, author, date, message, changed_paths, details_loaded FROM logs WHERE scope_id = ? AND revision = ? LIMIT 1',
         );
         statement.bind([scopeId, revision]);
         const hasRow = statement.step();
@@ -120,6 +165,7 @@ export class LogCache implements vscode.Disposable {
           date: String(row.date ?? ''),
           message: String(row.message ?? ''),
           changedPaths: deserializePaths(String(row.changed_paths ?? '[]')),
+          detailsLoaded: normalizeDetailsLoaded(row.details_loaded, true),
           cached: true,
         };
       } catch (error) {
@@ -166,9 +212,11 @@ export class LogCache implements vscode.Disposable {
           'date TEXT,' +
           'message TEXT,' +
           'changed_paths TEXT,' +
+          'details_loaded INTEGER NOT NULL DEFAULT 1,' +
           'PRIMARY KEY (scope_id, revision)' +
           ')',
       );
+      this.ensureDetailsLoadedColumn();
     } catch (error) {
       this.disableDatabase(error);
     }
@@ -193,7 +241,7 @@ export class LogCache implements vscode.Disposable {
 
     const offset = query.page * query.pageSize;
     const sql =
-      'SELECT revision, author, date, message, changed_paths FROM logs WHERE ' +
+      'SELECT revision, author, date, message, changed_paths, details_loaded FROM logs WHERE ' +
       where.join(' AND ') +
       ' ORDER BY revision DESC LIMIT ? OFFSET ?';
     const statement = this.database!.prepare(sql);
@@ -207,6 +255,7 @@ export class LogCache implements vscode.Disposable {
         date: String(row.date ?? ''),
         message: String(row.message ?? ''),
         changedPaths: deserializePaths(String(row.changed_paths ?? '[]')),
+        detailsLoaded: normalizeDetailsLoaded(row.details_loaded, true),
         cached: true,
       });
     }
@@ -267,6 +316,52 @@ export class LogCache implements vscode.Disposable {
       return false;
     }
     return true;
+  }
+
+  private ensureDetailsLoadedColumn(): void {
+    if (!this.database) {
+      return;
+    }
+
+    const statement = this.database.prepare('PRAGMA table_info(logs)');
+    let hasColumn = false;
+    while (statement.step()) {
+      const row = statement.getAsObject() as Record<string, unknown>;
+      if (String(row.name ?? '') === 'details_loaded') {
+        hasColumn = true;
+        break;
+      }
+    }
+    statement.free();
+
+    if (!hasColumn) {
+      this.database.run('ALTER TABLE logs ADD COLUMN details_loaded INTEGER NOT NULL DEFAULT 1');
+    }
+  }
+
+  private readExistingEntry(
+    statement: { bind(values: Array<string | number>): void; step(): boolean; getAsObject(): Record<string, unknown>; reset(): void },
+    scopeId: string,
+    revision: number,
+  ): SvnLogEntry | undefined {
+    statement.bind([scopeId, revision]);
+    const hasRow = statement.step();
+    if (!hasRow) {
+      statement.reset();
+      return undefined;
+    }
+
+    const row = statement.getAsObject() as Record<string, unknown>;
+    statement.reset();
+    return {
+      revision: Number(row.revision ?? revision),
+      author: String(row.author ?? 'unknown'),
+      date: String(row.date ?? ''),
+      message: String(row.message ?? ''),
+      changedPaths: deserializePaths(String(row.changed_paths ?? '[]')),
+      detailsLoaded: normalizeDetailsLoaded(row.details_loaded, true),
+      cached: true,
+    };
   }
 
   private disableDatabase(error: unknown): void {

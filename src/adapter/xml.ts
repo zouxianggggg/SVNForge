@@ -80,18 +80,22 @@ export function parseStatusXml(xml: string, toAbsolutePath: (path: string) => st
 export function parseLogXml(xml: string): SvnLogEntry[] {
   const root = parser.parse(xml);
   const logEntries = asArray(root?.log?.logentry);
-  return logEntries.map((entry: Record<string, unknown>) => ({
-    revision: Number(entry.revision ?? 0),
-    author: String(entry.author ?? 'unknown'),
-    date: String(entry.date ?? ''),
-    message: String(entry.msg ?? ''),
-    changedPaths: asArray(((entry.paths as { path?: Record<string, unknown> | Record<string, unknown>[] } | undefined)?.path)).map((pathEntry: Record<string, unknown>) => ({
-      action: String(pathEntry.action ?? ''),
-      path: String(pathEntry['#text'] ?? ''),
-      copyFromPath: pathEntry['copyfrom-path'] ? String(pathEntry['copyfrom-path']) : undefined,
-      copyFromRevision: pathEntry['copyfrom-rev'] ? Number(pathEntry['copyfrom-rev']) : undefined,
-    })),
-  }));
+  return logEntries.map((entry: Record<string, unknown>) => {
+    const pathsNode = entry.paths as { path?: Record<string, unknown> | Record<string, unknown>[] } | undefined;
+    return {
+      revision: Number(entry.revision ?? 0),
+      author: String(entry.author ?? 'unknown'),
+      date: String(entry.date ?? ''),
+      message: String(entry.msg ?? ''),
+      changedPaths: asArray(pathsNode?.path).map((pathEntry: Record<string, unknown>) => ({
+        action: String(pathEntry.action ?? ''),
+        path: String(pathEntry['#text'] ?? ''),
+        copyFromPath: pathEntry['copyfrom-path'] ? String(pathEntry['copyfrom-path']) : undefined,
+        copyFromRevision: pathEntry['copyfrom-rev'] ? Number(pathEntry['copyfrom-rev']) : undefined,
+      })),
+      detailsLoaded: pathsNode !== undefined,
+    };
+  });
 }
 
 export function parseListXml(xml: string, baseUrl: string): SvnListEntry[] {

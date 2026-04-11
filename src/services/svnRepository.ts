@@ -200,7 +200,7 @@ export class SvnRepository implements vscode.Disposable {
   public async getRevisionLog(revision: number, target?: vscode.Uri): Promise<SvnLogEntry | undefined> {
     const scopeId = target ? scopeIdForFile(target) : this.scopeId;
     const cached = await this.logCache.get(scopeId, revision);
-    if (cached) {
+    if (cached?.detailsLoaded) {
       return cached;
     }
 
@@ -584,7 +584,7 @@ export class SvnRepository implements vscode.Disposable {
       const entries = await this.cli.log(targetPath, {
         revisionRange: `${nextRevision}:1`,
         limit: query.pageSize,
-        verbose: true,
+        verbose: false,
         searchTarget: targetPath,
       });
       if (entries.length === 0) {
@@ -627,7 +627,7 @@ export class SvnRepository implements vscode.Disposable {
       const entries = await this.cli.log(targetPath, {
         revisionRange: `${nextRevision}:1`,
         limit: query.pageSize,
-        verbose: true,
+        verbose: false,
         searchTarget: targetPath,
       });
       if (entries.length === 0) {
