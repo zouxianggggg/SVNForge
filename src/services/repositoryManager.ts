@@ -3,11 +3,13 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SvnCli } from '../adapter/svnCli';
 import { getAutoRefresh, getRefreshDebounceMs } from '../config';
+import { ActionTreeProvider } from '../providers/actionTreeProvider';
 import { BlameProvider } from '../providers/blameProvider';
 import { BranchTreeItem, BranchTreeProvider } from '../providers/branchTreeProvider';
 import { ConflictDecorator } from '../providers/conflictDecorator';
 import { SvnContentProvider } from '../providers/contentProviders';
 import { HistoryPanel } from '../providers/historyPanel';
+import { RevisionDetailsItem, RevisionDetailsProvider, RevisionFileActionFilter, RevisionSelection } from '../providers/revisionDetailsProvider';
 import { RepositoryDashboardPanel } from '../providers/repositoryDashboardPanel';
 import { RepoBrowserItem, RepoBrowserProvider } from '../providers/repoBrowserProvider';
 import { SVN_BASE_SCHEME, SVN_REMOTE_SCHEME, SVN_REVISION_SCHEME } from '../providers/uri';
@@ -22,6 +24,8 @@ export class RepositoryManager implements vscode.Disposable {
   private readonly jenkins = new JenkinsService();
   private readonly repoBrowserProvider: RepoBrowserProvider;
   private readonly branchTreeProvider: BranchTreeProvider;
+  private readonly actionTreeProvider: ActionTreeProvider;
+  private readonly revisionDetailsProvider: RevisionDetailsProvider;
   private readonly blameProvider: BlameProvider;
   private readonly conflictDecorator = new ConflictDecorator();
   private readonly historyPanel: HistoryPanel;
@@ -29,12 +33,15 @@ export class RepositoryManager implements vscode.Disposable {
   private readonly statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   private readonly autoRefreshTimers = new Map<string, NodeJS.Timeout>();
   private readonly subscriptions: vscode.Disposable[] = [];
+  private selectedRevision: RevisionSelection | undefined;
 
   public constructor(private readonly context: vscode.ExtensionContext) {
     this.logCache = new LogCache(context);
     this.repoBrowserProvider = new RepoBrowserProvider(() => this.getRepositories());
     this.branchTreeProvider = new BranchTreeProvider(() => this.getRepositories());
-    this.historyPanel = new HistoryPanel((rootUri) => this.repositories.get(rootUri.fsPath));
+    this.actionTreeProvider = new ActionTreeProvider(() => this.getPreferredRepository(), () => vscode.window.activeTextEditor?.document.uri);
+    this.revisionDetailsProvider = new RevisionDetailsProvider();
+    this.historyPanel = new HistoryPanel((rootUri) => this.repositories.get(rootUri.fsPath), (selection) => this.setSelectedRevision(selection));
     this.dashboardPanel = new RepositoryDashboardPanel((rootUri) => this.repositories.get(rootUri.fsPath));
     this.blameProvider = new BlameProvider((uri) => this.getRepositoryForUri(uri));
   }
@@ -59,6 +66,8 @@ export class RepositoryManager implements vscode.Disposable {
       vscode.workspace.registerTextDocumentContentProvider(SVN_BASE_SCHEME, contentProvider),
       vscode.workspace.registerTextDocumentContentProvider(SVN_REVISION_SCHEME, contentProvider),
       vscode.workspace.registerTextDocumentContentProvider(SVN_REMOTE_SCHEME, contentProvider),
+      vscode.window.createTreeView('svnLens.actions', { treeDataProvider: this.actionTreeProvider }),
+      vscode.window.createTreeView('svnLens.revisionDetails', { treeDataProvider: this.revisionDetailsProvider }),
       vscode.window.createTreeView('svnLens.repoBrowser', { treeDataProvider: this.repoBrowserProvider }),
       vscode.window.createTreeView('svnLens.branches', { treeDataProvider: this.branchTreeProvider }),
       this.statusBarItem,
@@ -90,7 +99,7 @@ export class RepositoryManager implements vscode.Disposable {
   }
 
   public async refreshAllFromApi(): Promise<void> {
-    await this.refreshAll();
+    await this.scanWorkspace();
   }
 
   public async getRepositorySnapshots(): Promise<RepositorySnapshot[]> {
@@ -110,6 +119,62 @@ export class RepositoryManager implements vscode.Disposable {
 
   public getOpenPanelKeys(): string[] {
     return [...this.historyPanel.getPanelKeys(), ...this.dashboardPanel.getPanelKeys()];
+  }
+
+  public async getRepositoryLogPreview(
+    rootPath: string,
+    pageSize = 10,
+  ): Promise<Array<{ revision: number; author: string; date: string; message: string }>> {
+    const repository = this.repositories.get(rootPath);
+    if (!repository) {
+      return [];
+    }
+
+    const page = await repository.getLogPage({ page: 0, pageSize });
+    return page.entries.map((entry) => ({
+      revision: entry.revision,
+      author: entry.author,
+      date: entry.date,
+      message: entry.message,
+    }));
+  }
+
+  public async getFileHistoryPreview(
+    filePath: string,
+    pageSize = 10,
+  ): Promise<Array<{ revision: number; author: string; date: string; message: string }>> {
+    const fileUri = vscode.Uri.file(filePath);
+    const repository = this.getRepositoryForUri(fileUri);
+    if (!repository) {
+      return [];
+    }
+
+    const page = await repository.getFileHistory(fileUri, { page: 0, pageSize });
+    return page.entries.map((entry) => ({
+      revision: entry.revision,
+      author: entry.author,
+      date: entry.date,
+      message: entry.message,
+    }));
+  }
+
+  public async getBlamePreview(
+    filePath: string,
+    maxLines = 10,
+  ): Promise<Array<{ lineNumber: number; revision: number; author: string; date?: string }>> {
+    const fileUri = vscode.Uri.file(filePath);
+    const repository = this.getRepositoryForUri(fileUri);
+    if (!repository) {
+      return [];
+    }
+
+    const lines = await repository.getBlame(fileUri);
+    return lines.slice(0, maxLines).map((line) => ({
+      lineNumber: line.lineNumber,
+      revision: line.revision,
+      author: line.author,
+      date: line.date,
+    }));
   }
 
   public getRepositoryForUri(uri: vscode.Uri): SvnRepository | undefined {
@@ -138,6 +203,7 @@ export class RepositoryManager implements vscode.Disposable {
       }),
       vscode.window.onDidChangeActiveTextEditor(() => {
         this.updateStatusBar();
+        this.actionTreeProvider.refresh();
         this.conflictDecorator.refresh();
         void this.blameProvider.refreshActiveEditor();
       }),
@@ -180,6 +246,9 @@ export class RepositoryManager implements vscode.Disposable {
     command('svnLens.acceptTheirs', (uri?: vscode.Uri) => this.resolveConflict(uri, 'theirs-full'));
     command('svnLens.markResolved', (uri?: vscode.Uri) => this.markResolved(uri));
     command('svnLens.openConflictDiff', (uri?: vscode.Uri) => this.openConflictDiff(uri));
+    command('svnLens.openSelectedRevisionPath', (item?: RevisionDetailsItem) => this.openSelectedRevisionPath(item));
+    command('svnLens.filterSelectedRevisionFiles', () => this.filterSelectedRevisionFiles());
+    command('svnLens.clearSelectedRevisionFilesFilter', () => this.clearSelectedRevisionFilesFilter());
   }
 
   private async scanWorkspace(): Promise<void> {
@@ -212,6 +281,10 @@ export class RepositoryManager implements vscode.Disposable {
 
     this.repoBrowserProvider.refresh();
     this.branchTreeProvider.refresh();
+    this.actionTreeProvider.refresh();
+    if (this.selectedRevision && !this.repositories.has(this.selectedRevision.repository.rootUri.fsPath)) {
+      this.setSelectedRevision(undefined);
+    }
     this.updateStatusBar();
   }
 
@@ -232,6 +305,7 @@ export class RepositoryManager implements vscode.Disposable {
     }
     this.repoBrowserProvider.refresh();
     this.branchTreeProvider.refresh();
+    this.actionTreeProvider.refresh();
     this.updateStatusBar();
   }
 
@@ -335,7 +409,11 @@ export class RepositoryManager implements vscode.Disposable {
     if (!targetUri) {
       return;
     }
-    const repository = this.getRepositoryForUri(targetUri);
+    let repository = this.getRepositoryForUri(targetUri);
+    if (!repository) {
+      await this.scanWorkspace();
+      repository = this.getRepositoryForUri(targetUri);
+    }
     if (!repository) {
       return;
     }
@@ -523,10 +601,24 @@ export class RepositoryManager implements vscode.Disposable {
     await this.conflictDecorator.openConflictDiff(repository, targetUri);
   }
 
+  private async openSelectedRevisionPath(item?: RevisionDetailsItem): Promise<void> {
+    if (!item?.selection || !item.changedPath) {
+      return;
+    }
+
+    await item.selection.repository.openChangedPathRevision(
+      item.changedPath.path,
+      item.changedPath.action,
+      item.selection.entry.revision,
+      item.selection.previousRevision,
+    );
+  }
+
   private updateStatusBar(): void {
     const repository = this.getPreferredRepository();
     if (!repository) {
       this.statusBarItem.hide();
+      this.actionTreeProvider.refresh();
       return;
     }
 
@@ -535,6 +627,7 @@ export class RepositoryManager implements vscode.Disposable {
     this.statusBarItem.tooltip = repository.rootUri.fsPath;
     this.statusBarItem.command = 'svnLens.showLog';
     this.statusBarItem.show();
+    this.actionTreeProvider.refresh();
   }
 
   private getPreferredRepository(): SvnRepository | undefined {
@@ -546,6 +639,10 @@ export class RepositoryManager implements vscode.Disposable {
   }
 
   private async pickRepository(rootUri?: vscode.Uri): Promise<SvnRepository | undefined> {
+    if (this.repositories.size === 0 || (rootUri && !this.repositories.has(rootUri.fsPath))) {
+      await this.scanWorkspace();
+    }
+
     if (rootUri) {
       return this.repositories.get(rootUri.fsPath);
     }
@@ -587,5 +684,42 @@ export class RepositoryManager implements vscode.Disposable {
       void repository.refresh();
     }, getRefreshDebounceMs(repository.rootUri));
     this.autoRefreshTimers.set(key, timer);
+  }
+
+  private setSelectedRevision(selection: RevisionSelection | undefined): void {
+    this.selectedRevision = selection;
+    this.revisionDetailsProvider.setSelection(selection);
+  }
+
+  private async filterSelectedRevisionFiles(): Promise<void> {
+    if (!this.selectedRevision) {
+      void vscode.window.showInformationMessage('Select a revision first.');
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: 'All actions', value: 'all' as RevisionFileActionFilter },
+        { label: 'Added only', value: 'A' as RevisionFileActionFilter },
+        { label: 'Modified only', value: 'M' as RevisionFileActionFilter },
+        { label: 'Deleted only', value: 'D' as RevisionFileActionFilter },
+        { label: 'Replaced only', value: 'R' as RevisionFileActionFilter },
+        { label: 'Other actions', value: 'other' as RevisionFileActionFilter },
+      ],
+      {
+        title: 'Filter changed files',
+        placeHolder: `Current filter: ${this.revisionDetailsProvider.getActionFilter()}`,
+      },
+    );
+    if (!picked) {
+      return;
+    }
+
+    this.revisionDetailsProvider.setActionFilter(picked.value);
+  }
+
+  private async clearSelectedRevisionFilesFilter(): Promise<void> {
+    this.revisionDetailsProvider.setActionFilter('all');
+    void vscode.window.showInformationMessage('Revision file filter cleared.');
   }
 }

@@ -12,6 +12,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<SVNLen
     refreshAll: () => manager!.refreshAllFromApi(),
     getRepositorySnapshots: () => manager!.getRepositorySnapshots(),
     getOpenPanelKeys: () => manager!.getOpenPanelKeys(),
+    getRepositoryLogPreview: (rootPath: string, pageSize?: number) => manager!.getRepositoryLogPreview(rootPath, pageSize),
+    getFileHistoryPreview: (filePath: string, pageSize?: number) => manager!.getFileHistoryPreview(filePath, pageSize),
+    getBlamePreview: (filePath: string, maxLines?: number) => manager!.getBlamePreview(filePath, maxLines),
   };
 }
 

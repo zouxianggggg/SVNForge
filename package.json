@@ -16,8 +16,8 @@
     "theme": "dark"
   },
   "markdown": "github",
-  "version": "0.1.1",
-  "publisher": "local",
+  "version": "0.1.2",
+  "publisher": "zouxiangggggDev",
   "license": "MIT",
   "engines": {
     "vscode": "^1.96.0"
@@ -37,6 +37,8 @@
   "activationEvents": [
     "onStartupFinished",
     "workspaceContains:.svn",
+    "onView:svnLens.actions",
+    "onView:svnLens.revisionDetails",
     "onView:svnLens.repoBrowser",
     "onView:svnLens.branches",
     "onCommand:svnLens.checkout",
@@ -76,6 +78,15 @@
           "minimum": 10,
           "maximum": 500,
           "description": "Default page size for log and file history queries."
+        },
+        "svnLens.actionsPreset": {
+          "type": "string",
+          "enum": [
+            "basic",
+            "complete"
+          ],
+          "default": "complete",
+          "description": "Controls how many commands appear in the Actions sidebar. Use 'complete' to expose all currently implemented SVNForge operations."
         },
         "svnLens.enableBlameDecorations": {
           "type": "boolean",
@@ -127,6 +138,14 @@
     },
     "views": {
       "svnLens": [
+        {
+          "id": "svnLens.actions",
+          "name": "Actions"
+        },
+        {
+          "id": "svnLens.revisionDetails",
+          "name": "Selected Revision"
+        },
         {
           "id": "svnLens.repoBrowser",
           "name": "Repository Browser"
@@ -241,6 +260,14 @@
       {
         "command": "svnLens.openConflictDiff",
         "title": "SVN: Open Conflict Diff"
+      },
+      {
+        "command": "svnLens.filterSelectedRevisionFiles",
+        "title": "SVN: Filter Selected Revision Files"
+      },
+      {
+        "command": "svnLens.clearSelectedRevisionFilesFilter",
+        "title": "SVN: Clear Selected Revision File Filter"
       }
     ],
     "menus": {
@@ -295,8 +322,18 @@
       "view/title": [
         {
           "command": "svnLens.refresh",
-          "when": "view == svnLens.repoBrowser || view == svnLens.branches",
+          "when": "view == svnLens.repoBrowser || view == svnLens.branches || view == svnLens.actions || view == svnLens.revisionDetails",
           "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.filterSelectedRevisionFiles",
+          "when": "view == svnLens.revisionDetails",
+          "group": "navigation@2"
+        },
+        {
+          "command": "svnLens.clearSelectedRevisionFilesFilter",
+          "when": "view == svnLens.revisionDetails",
+          "group": "navigation@3"
         },
         {
           "command": "svnLens.openRepoBrowser",
@@ -337,6 +374,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "npm run compile && node ./out/test/runTest.js",
+    "test:remote-repo": "npm run compile && node ./out/test/runRemoteRepoSmoke.js",
     "vscode:prepublish": "npm run compile",
     "package:vsix": "npm run compile && vsce package --no-yarn --allow-missing-repository",
     "publish:dry-run": "npm run compile && vsce package --no-yarn --allow-missing-repository",

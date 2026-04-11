@@ -189,14 +189,12 @@ export class SvnRepository implements vscode.Disposable {
   }
 
   public async getLogPage(query: LogQuery): Promise<LogPage> {
-    await this.ensureLogCoverage(this.scopeId, this.rootUri.fsPath, query);
-    return this.logCache.query(this.scopeId, query);
+    return this.loadLogPage(this.scopeId, this.rootUri.fsPath, query);
   }
 
   public async getFileHistory(target: vscode.Uri, query: LogQuery): Promise<LogPage> {
     const scopeId = scopeIdForFile(target);
-    await this.ensureLogCoverage(scopeId, target.fsPath, query);
-    return this.logCache.query(scopeId, query);
+    return this.loadLogPage(scopeId, target.fsPath, query);
   }
 
   public async getRevisionLog(revision: number, target?: vscode.Uri): Promise<SvnLogEntry | undefined> {
@@ -279,9 +277,36 @@ export class SvnRepository implements vscode.Disposable {
 
   public async openRemote(url: string, revision?: string): Promise<void> {
     const title = revision ? `${url}@${revision}` : url;
-    const uri = buildRemoteUri(url, revision, title);
+    const uri = buildRemoteUri(url, revision, title, this.rootUri.fsPath);
     const document = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(document, { preview: true });
+  }
+
+  public async openChangedPathRevision(changePath: string, action: string, revision: number, previousRevision?: number): Promise<void> {
+    const url = await this.toRepositoryUrl(changePath);
+    const safePreviousRevision = String(Math.max(1, previousRevision ?? revision - 1));
+    const currentRevision = String(revision);
+    const name = path.posix.basename(changePath) || changePath;
+
+    if (action === 'A') {
+      await this.openRemote(url, currentRevision);
+      return;
+    }
+
+    if (action === 'D') {
+      await this.openRemote(url, safePreviousRevision);
+      return;
+    }
+
+    const left = buildRemoteUri(url, safePreviousRevision, `${name}@r${safePreviousRevision}`, this.rootUri.fsPath);
+    const right = buildRemoteUri(url, currentRevision, `${name}@r${currentRevision}`, this.rootUri.fsPath);
+    await vscode.commands.executeCommand(
+      'vscode.diff',
+      left,
+      right,
+      `${name}: r${safePreviousRevision} ↔ r${currentRevision}`,
+      { preview: true },
+    );
   }
 
   public async createBranch(name: string, fromUrl?: string, message?: string): Promise<void> {
@@ -553,17 +578,11 @@ export class SvnRepository implements vscode.Disposable {
       pageSize: desiredEntries,
     });
     let fetchWindow = 0;
-    const targetInfo = await this.cli.info(targetPath);
-    const headRevision = Math.max(
-      targetInfo.lastChangedRevision ?? 0,
-      targetInfo.revision,
-      (await this.getInfo()).revision,
-    );
+    let nextRevision = await this.getHeadRevision(targetPath);
 
-    while (currentPage.entries.length < desiredEntries && fetchWindow < 20) {
-      const startRevision = Math.max(1, headRevision - fetchWindow * query.pageSize);
+    while (currentPage.entries.length < desiredEntries && fetchWindow < 20 && nextRevision >= 1) {
       const entries = await this.cli.log(targetPath, {
-        revisionRange: `${startRevision}:1`,
+        revisionRange: `${nextRevision}:1`,
         limit: query.pageSize,
         verbose: true,
         searchTarget: targetPath,
@@ -584,6 +603,92 @@ export class SvnRepository implements vscode.Disposable {
       if (lastRevision <= 1 || entries.length < query.pageSize) {
         break;
       }
+      nextRevision = lastRevision - 1;
     }
+  }
+
+  private async loadLogPage(scopeId: string, targetPath: string, query: LogQuery): Promise<LogPage> {
+    await this.ensureLogCoverage(scopeId, targetPath, query);
+    const cachedPage = await this.logCache.query(scopeId, query);
+    if (cachedPage.entries.length > 0) {
+      return cachedPage;
+    }
+
+    return this.fetchLiveLogPage(scopeId, targetPath, query);
+  }
+
+  private async fetchLiveLogPage(scopeId: string, targetPath: string, query: LogQuery): Promise<LogPage> {
+    const desiredEntries = (query.page + 1) * query.pageSize;
+    const collected = new Map<number, SvnLogEntry>();
+    let nextRevision = await this.getHeadRevision(targetPath);
+    let fetchWindow = 0;
+
+    while (this.filterLogEntries([...collected.values()], query).length < desiredEntries && fetchWindow < 20 && nextRevision >= 1) {
+      const entries = await this.cli.log(targetPath, {
+        revisionRange: `${nextRevision}:1`,
+        limit: query.pageSize,
+        verbose: true,
+        searchTarget: targetPath,
+      });
+      if (entries.length === 0) {
+        break;
+      }
+
+      await this.logCache.store(scopeId, entries);
+      for (const entry of entries) {
+        collected.set(entry.revision, entry);
+      }
+
+      fetchWindow += 1;
+      const lastRevision = entries.at(-1)?.revision ?? 0;
+      if (lastRevision <= 1 || entries.length < query.pageSize) {
+        break;
+      }
+      nextRevision = lastRevision - 1;
+    }
+
+    const filtered = this.filterLogEntries([...collected.values()], query);
+    const offset = query.page * query.pageSize;
+    const pageEntries = filtered.slice(offset, offset + query.pageSize + 1);
+    return {
+      entries: pageEntries.slice(0, query.pageSize),
+      page: query.page,
+      pageSize: query.pageSize,
+      hasMore: pageEntries.length > query.pageSize,
+    };
+  }
+
+  private async getHeadRevision(targetPath: string): Promise<number> {
+    const targetInfo = await this.cli.info(targetPath);
+    return Math.max(
+      targetInfo.lastChangedRevision ?? 0,
+      targetInfo.revision,
+      (await this.getInfo()).revision,
+      1,
+    );
+  }
+
+  private filterLogEntries(entries: readonly SvnLogEntry[], query: LogQuery): SvnLogEntry[] {
+    return [...entries]
+      .filter((entry) => this.matchesLogQuery(entry, query))
+      .sort((left, right) => right.revision - left.revision);
+  }
+
+  private matchesLogQuery(entry: SvnLogEntry, query: LogQuery): boolean {
+    if (query.author && !entry.author.toLowerCase().includes(query.author.toLowerCase())) {
+      return false;
+    }
+    if (query.from && entry.date < query.from) {
+      return false;
+    }
+    if (query.to && entry.date > query.to) {
+      return false;
+    }
+    return true;
+  }
+
+  private async toRepositoryUrl(changePath: string): Promise<string> {
+    const info = await this.getInfo();
+    return `${info.rootUrl.replace(/\/+$/, '')}/${changePath.replace(/^\/+/, '')}`;
   }
 }

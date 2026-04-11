@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SVNLensApi } from '../../api';
 
-const extensionId = 'local.svnforge';
+const extensionId = 'zouxiangggggDev.svnforge';
 
 function getWorkingCopyPath(): string {
   const value = process.env.SVNLENS_TEST_WORKING_COPY;
@@ -94,6 +94,13 @@ suite('SVNForge Extension Host', () => {
   test('opens dashboard, log, graph and file history panels', async () => {
     const api = await getApi();
     await api.refreshAll();
+
+    const logPreview = await api.getRepositoryLogPreview(workingCopyPath, 5);
+    assert.ok(logPreview.length > 0, 'Repository log preview should not be empty');
+    assert.ok(
+      logPreview.some((entry) => /Initial file|Initialize layout/.test(entry.message)),
+      'Repository log preview should include recent commits',
+    );
 
     await vscode.commands.executeCommand('svnLens.openRepoBrowser');
     await vscode.commands.executeCommand('svnLens.showLog');

@@ -55,9 +55,10 @@ export function buildRevisionUri(fileUri: vscode.Uri, repoRoot: vscode.Uri, revi
   );
 }
 
-export function buildRemoteUri(url: string, revision?: string, title?: string): vscode.Uri {
+export function buildRemoteUri(url: string, revision?: string, title?: string, repoRoot?: string): vscode.Uri {
   return vscode.Uri.parse(
     `${SVN_REMOTE_SCHEME}:${new URL(url).pathname}?${encodePayload({
+      repoRoot,
       url,
       revision,
       title: title ?? url,

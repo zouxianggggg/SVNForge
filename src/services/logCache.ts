@@ -23,6 +23,7 @@ export class LogCache implements vscode.Disposable {
   private initialized: Promise<void> | undefined;
   private dirty = false;
   private saveTimer: NodeJS.Timeout | undefined;
+  private fallbackWarningShown = false;
 
   public constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -40,8 +41,8 @@ export class LogCache implements vscode.Disposable {
     }
 
     if (this.database) {
-      this.database.run('BEGIN');
       try {
+        this.database.run('BEGIN');
         const statement = this.database.prepare(
           'INSERT OR REPLACE INTO logs (scope_id, revision, author, date, message, changed_paths) VALUES (?, ?, ?, ?, ?, ?)',
         );
@@ -57,13 +58,16 @@ export class LogCache implements vscode.Disposable {
         }
         statement.free();
         this.database.run('COMMIT');
+        this.schedulePersist();
+        return;
       } catch (error) {
-        this.database.run('ROLLBACK');
-        throw error;
+        try {
+          this.database?.run('ROLLBACK');
+        } catch {
+          // Ignore rollback failures and fall back to the in-memory cache.
+        }
+        this.disableDatabase(error);
       }
-
-      this.schedulePersist();
-      return;
     }
 
     const bucket = this.getFallbackBucket(scopeId);
@@ -75,7 +79,11 @@ export class LogCache implements vscode.Disposable {
   public async query(scopeId: string, query: LogQuery): Promise<LogPage> {
     await this.initialize();
     if (this.database) {
-      return this.queryDatabase(scopeId, query);
+      try {
+        return this.queryDatabase(scopeId, query);
+      } catch (error) {
+        this.disableDatabase(error);
+      }
     }
 
     const rows = Array.from(this.getFallbackBucket(scopeId).values())
@@ -94,25 +102,29 @@ export class LogCache implements vscode.Disposable {
   public async get(scopeId: string, revision: number): Promise<SvnLogEntry | undefined> {
     await this.initialize();
     if (this.database) {
-      const statement = this.database.prepare(
-        'SELECT revision, author, date, message, changed_paths FROM logs WHERE scope_id = ? AND revision = ? LIMIT 1',
-      );
-      statement.bind([scopeId, revision]);
-      const hasRow = statement.step();
-      if (!hasRow) {
+      try {
+        const statement = this.database.prepare(
+          'SELECT revision, author, date, message, changed_paths FROM logs WHERE scope_id = ? AND revision = ? LIMIT 1',
+        );
+        statement.bind([scopeId, revision]);
+        const hasRow = statement.step();
+        if (!hasRow) {
+          statement.free();
+          return undefined;
+        }
+        const row = statement.getAsObject() as Record<string, unknown>;
         statement.free();
-        return undefined;
+        return {
+          revision: Number(row.revision ?? revision),
+          author: String(row.author ?? 'unknown'),
+          date: String(row.date ?? ''),
+          message: String(row.message ?? ''),
+          changedPaths: deserializePaths(String(row.changed_paths ?? '[]')),
+          cached: true,
+        };
+      } catch (error) {
+        this.disableDatabase(error);
       }
-      const row = statement.getAsObject() as Record<string, unknown>;
-      statement.free();
-      return {
-        revision: Number(row.revision ?? revision),
-        author: String(row.author ?? 'unknown'),
-        date: String(row.date ?? ''),
-        message: String(row.message ?? ''),
-        changedPaths: deserializePaths(String(row.changed_paths ?? '[]')),
-        cached: true,
-      };
     }
 
     return this.getFallbackBucket(scopeId).get(revision);
@@ -158,8 +170,7 @@ export class LogCache implements vscode.Disposable {
           ')',
       );
     } catch (error) {
-      void vscode.window.showWarningMessage(`SVNLens: SQLite log cache unavailable, using in-memory cache. ${String(error)}`);
-      this.database = undefined;
+      this.disableDatabase(error);
     }
   }
 
@@ -223,9 +234,13 @@ export class LogCache implements vscode.Disposable {
     if (!this.database || !this.dirty) {
       return;
     }
-    const bytes = this.database.export();
-    await fs.writeFile(this.getDatabasePath(), Buffer.from(bytes));
-    this.dirty = false;
+    try {
+      const bytes = this.database.export();
+      await fs.writeFile(this.getDatabasePath(), Buffer.from(bytes));
+      this.dirty = false;
+    } catch (error) {
+      this.disableDatabase(error);
+    }
   }
 
   private getDatabasePath(): string {
@@ -252,5 +267,30 @@ export class LogCache implements vscode.Disposable {
       return false;
     }
     return true;
+  }
+
+  private disableDatabase(error: unknown): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+    }
+
+    if (this.database) {
+      try {
+        this.database.close();
+      } catch {
+        // Ignore close failures during fallback.
+      }
+    }
+
+    this.database = undefined;
+    this.sql = undefined;
+    this.dirty = false;
+
+    if (!this.fallbackWarningShown) {
+      this.fallbackWarningShown = true;
+      const reason = error instanceof Error ? error.message : String(error);
+      void vscode.window.showWarningMessage(`SVNForge: SQLite log cache unavailable, using in-memory cache. ${reason}`);
+    }
   }
 }

@@ -23,6 +23,7 @@ async function main(): Promise<void> {
   const repoPath = path.join(tempRoot, 'repo');
   const workingCopyPath = path.join(tempRoot, 'wc');
   const secondWorkingCopyPath = path.join(tempRoot, 'wc-second');
+  const userDataDir = path.join(tempRoot, 'vscode-user-data');
   const repoUrl = pathToFileURL(repoPath).toString();
 
   try {
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
-      launchArgs: [workingCopyPath, '--disable-workspace-trust'],
+      launchArgs: ['--new-window', '--disable-workspace-trust', '--user-data-dir', userDataDir, workingCopyPath],
     });
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
