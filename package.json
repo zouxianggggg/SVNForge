@@ -127,17 +127,8 @@
         }
       }
     },
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "svnLens",
-          "title": "SVN",
-          "icon": "$(source-control)"
-        }
-      ]
-    },
     "views": {
-      "svnLens": [
+      "scm": [
         {
           "id": "svnLens.actions",
           "name": "Actions"
