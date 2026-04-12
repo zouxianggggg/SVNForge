@@ -5,6 +5,7 @@ import { getCommitMessagePattern, getDefaultBranchRoots, getPreCommitCommand } f
 import { SvnCli } from '../adapter/svnCli';
 import {
   CachedBlameDocument,
+  SvnExternalDefinition,
   JenkinsBuildStatus,
   LogPage,
   LogQuery,
@@ -232,6 +233,59 @@ export class SvnRepository implements vscode.Disposable {
 
   public async listRemote(url: string): Promise<SvnListEntry[]> {
     return this.cli.list(url);
+  }
+
+  public async getExternals(): Promise<SvnExternalDefinition[]> {
+    const values = await this.cli.propGetRecursive(this.rootUri.fsPath, 'svn:externals', '.');
+    return values
+      .filter((entry) => entry.name === 'svn:externals' && entry.value.trim().length > 0)
+      .flatMap((entry) => this.parseExternalDefinitions(entry.path, entry.value));
+  }
+
+  public async getExternalPropertyText(ownerRelativePath?: string): Promise<string> {
+    const ownerTarget = ownerRelativePath && ownerRelativePath !== '.' ? ownerRelativePath : '.';
+    return this.cli.propGet(this.rootUri.fsPath, 'svn:externals', ownerTarget).catch(() => '');
+  }
+
+  public async setExternalPropertyText(ownerRelativePath: string | undefined, value: string): Promise<void> {
+    const ownerTarget = ownerRelativePath && ownerRelativePath !== '.' ? ownerRelativePath : '.';
+    await this.cli.propSet(this.rootUri.fsPath, 'svn:externals', value.replace(/\s+$/u, ''), ownerTarget);
+    await this.refresh();
+  }
+
+  public async resolveExternalUrl(external: SvnExternalDefinition): Promise<string> {
+    const source = external.url.trim();
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source)) {
+      return source;
+    }
+
+    const info = await this.getInfo();
+    const ownerUrl = this.getOwnerRepositoryUrl(info.url, external.ownerRelativePath);
+    if (source.startsWith('^/')) {
+      return `${info.rootUrl.replace(/\/+$/u, '')}/${source.slice(2).replace(/^\/+/, '')}`;
+    }
+    if (source.startsWith('//')) {
+      const protocol = new URL(info.url).protocol;
+      return `${protocol}${source}`;
+    }
+    if (source.startsWith('/')) {
+      const origin = new URL(info.url).origin;
+      return `${origin}${source}`;
+    }
+    return new URL(source, ownerUrl.endsWith('/') ? ownerUrl : `${ownerUrl}/`).toString();
+  }
+
+  public async updateExternalRevision(external: SvnExternalDefinition, revision: string): Promise<void> {
+    const ownerTarget = external.ownerRelativePath || '.';
+    const currentValue = await this.cli.propGet(this.rootUri.fsPath, 'svn:externals', ownerTarget).catch(() => '');
+    const lines = currentValue.split(/\r?\n/);
+    if (external.lineIndex < 0 || external.lineIndex >= lines.length) {
+      throw new Error(`Unable to update external in ${ownerTarget}: line no longer exists.`);
+    }
+
+    lines[external.lineIndex] = this.replaceExternalRevision(lines[external.lineIndex], revision);
+    await this.cli.propSet(this.rootUri.fsPath, 'svn:externals', lines.join('\n').trim(), ownerTarget);
+    await this.refresh();
   }
 
   public setRepoBrowserRoot(url: string | undefined): void {
@@ -675,6 +729,16 @@ export class SvnRepository implements vscode.Disposable {
   }
 
   private matchesLogQuery(entry: SvnLogEntry, query: LogQuery): boolean {
+    if (typeof query.revision === 'number' && Number.isFinite(query.revision) && query.revision > 0 && entry.revision !== query.revision) {
+      return false;
+    }
+    if (query.keyword) {
+      const needle = query.keyword.toLowerCase();
+      const haystacks = [entry.message, entry.author, String(entry.revision)].map((value) => value.toLowerCase());
+      if (!haystacks.some((value) => value.includes(needle))) {
+        return false;
+      }
+    }
     if (query.author && !entry.author.toLowerCase().includes(query.author.toLowerCase())) {
       return false;
     }
@@ -690,5 +754,113 @@ export class SvnRepository implements vscode.Disposable {
   private async toRepositoryUrl(changePath: string): Promise<string> {
     const info = await this.getInfo();
     return `${info.rootUrl.replace(/\/+$/, '')}/${changePath.replace(/^\/+/, '')}`;
+  }
+
+  private parseExternalDefinitions(ownerPath: string, value: string): SvnExternalDefinition[] {
+    const ownerSource = String(ownerPath || '.');
+    const relativeOwner = path.isAbsolute(ownerSource)
+      ? path.relative(this.rootUri.fsPath, ownerSource)
+      : ownerSource;
+    const normalizedOwner = relativeOwner === '.' ? '' : relativeOwner.replace(/^\.\//, '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+    const ownerAbsolutePath = normalizedOwner ? path.join(this.rootUri.fsPath, normalizedOwner) : this.rootUri.fsPath;
+    const lines = value.split(/\r?\n/);
+    const entries: SvnExternalDefinition[] = [];
+
+    lines.forEach((line, lineIndex) => {
+      const parsed = this.parseExternalLine(line);
+      if (!parsed) {
+        return;
+      }
+      entries.push({
+        ownerRelativePath: normalizedOwner,
+        ownerAbsolutePath,
+        rawLine: line,
+        lineIndex,
+        target: parsed.target,
+        url: parsed.url,
+        operativeRevision: parsed.operativeRevision,
+      });
+    });
+
+    return entries;
+  }
+
+  private parseExternalLine(line: string): { target: string; url: string; operativeRevision?: string } | undefined {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      return undefined;
+    }
+
+    const tokens = (trimmed.match(/"[^"]+"|'[^']+'|\S+/g) ?? []).map((token) => token.replace(/^['"]|['"]$/g, ''));
+    if (tokens.length < 2) {
+      return undefined;
+    }
+
+    let operativeRevision: string | undefined;
+    const filteredTokens: string[] = [];
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (/^-r.+/.test(token)) {
+        operativeRevision = token.slice(2);
+        continue;
+      }
+      if (token === '-r' && index + 1 < tokens.length) {
+        operativeRevision = tokens[index + 1];
+        index += 1;
+        continue;
+      }
+      filteredTokens.push(token);
+    }
+
+    const urlIndex = filteredTokens.findIndex((token) => this.isExternalSourceToken(token));
+    if (urlIndex === -1 || filteredTokens.length < 2) {
+      return undefined;
+    }
+
+    if (urlIndex === 0) {
+      return {
+        url: filteredTokens[0],
+        target: filteredTokens.at(-1) ?? filteredTokens[0],
+        operativeRevision,
+      };
+    }
+
+    return {
+      target: filteredTokens[0],
+      url: filteredTokens.at(-1) ?? filteredTokens[0],
+      operativeRevision,
+    };
+  }
+
+  private isExternalSourceToken(token: string): boolean {
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(token)
+      || token.startsWith('^/')
+      || token.startsWith('//')
+      || token.startsWith('/')
+      || token.startsWith('../')
+      || token.startsWith('./');
+  }
+
+  private replaceExternalRevision(line: string, revision: string): string {
+    const trimmedRevision = revision.trim();
+    if (!trimmedRevision) {
+      throw new Error('External revision cannot be empty.');
+    }
+
+    if (/-r\s+\S+/.test(line)) {
+      return line.replace(/-r\s+\S+/, `-r ${trimmedRevision}`);
+    }
+    if (/-r\S+/.test(line)) {
+      return line.replace(/-r\S+/, `-r${trimmedRevision}`);
+    }
+    return `-r${trimmedRevision} ${line.trim()}`;
+  }
+
+  private getOwnerRepositoryUrl(baseUrl: string, ownerRelativePath: string): string {
+    const normalizedOwner = ownerRelativePath && ownerRelativePath !== '.' ? ownerRelativePath.replace(/^\/+/, '') : '';
+    if (!normalizedOwner) {
+      return baseUrl;
+    }
+    return `${baseUrl.replace(/\/+$/u, '')}/${normalizedOwner}`;
   }
 }

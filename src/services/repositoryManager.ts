@@ -1,4 +1,5 @@
 import { RepositorySnapshot } from '../api';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SvnCli } from '../adapter/svnCli';
@@ -8,6 +9,7 @@ import { BlameProvider } from '../providers/blameProvider';
 import { BranchTreeItem, BranchTreeProvider } from '../providers/branchTreeProvider';
 import { ConflictDecorator } from '../providers/conflictDecorator';
 import { SvnContentProvider } from '../providers/contentProviders';
+import { ExternalTreeItem, ExternalTreeProvider } from '../providers/externalTreeProvider';
 import { HistoryPanel } from '../providers/historyPanel';
 import { RevisionDetailsItem, RevisionDetailsProvider, RevisionFileActionFilter, RevisionSelection } from '../providers/revisionDetailsProvider';
 import { RepositoryDashboardPanel } from '../providers/repositoryDashboardPanel';
@@ -24,6 +26,7 @@ export class RepositoryManager implements vscode.Disposable {
   private readonly jenkins = new JenkinsService();
   private readonly repoBrowserProvider: RepoBrowserProvider;
   private readonly branchTreeProvider: BranchTreeProvider;
+  private readonly externalTreeProvider: ExternalTreeProvider;
   private readonly actionTreeProvider: ActionTreeProvider;
   private readonly revisionDetailsProvider: RevisionDetailsProvider;
   private readonly blameProvider: BlameProvider;
@@ -32,6 +35,7 @@ export class RepositoryManager implements vscode.Disposable {
   private readonly dashboardPanel: RepositoryDashboardPanel;
   private readonly statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   private readonly autoRefreshTimers = new Map<string, NodeJS.Timeout>();
+  private readonly externalEditSessions = new Map<string, { repository: SvnRepository; ownerRelativePath: string | undefined }>();
   private readonly subscriptions: vscode.Disposable[] = [];
   private selectedRevision: RevisionSelection | undefined;
 
@@ -39,6 +43,7 @@ export class RepositoryManager implements vscode.Disposable {
     this.logCache = new LogCache(context);
     this.repoBrowserProvider = new RepoBrowserProvider(() => this.getRepositories());
     this.branchTreeProvider = new BranchTreeProvider(() => this.getRepositories());
+    this.externalTreeProvider = new ExternalTreeProvider(() => this.getRepositories());
     this.actionTreeProvider = new ActionTreeProvider(() => this.getPreferredRepository(), () => vscode.window.activeTextEditor?.document.uri);
     this.revisionDetailsProvider = new RevisionDetailsProvider();
     this.historyPanel = new HistoryPanel((rootUri) => this.repositories.get(rootUri.fsPath), (selection) => this.setSelectedRevision(selection));
@@ -68,6 +73,7 @@ export class RepositoryManager implements vscode.Disposable {
       vscode.workspace.registerTextDocumentContentProvider(SVN_REMOTE_SCHEME, contentProvider),
       vscode.window.createTreeView('svnLens.actions', { treeDataProvider: this.actionTreeProvider }),
       vscode.window.createTreeView('svnLens.revisionDetails', { treeDataProvider: this.revisionDetailsProvider }),
+      vscode.window.createTreeView('svnLens.externals', { treeDataProvider: this.externalTreeProvider }),
       vscode.window.createTreeView('svnLens.repoBrowser', { treeDataProvider: this.repoBrowserProvider }),
       vscode.window.createTreeView('svnLens.branches', { treeDataProvider: this.branchTreeProvider }),
       this.statusBarItem,
@@ -190,6 +196,10 @@ export class RepositoryManager implements vscode.Disposable {
         void this.scanWorkspace();
       }),
       vscode.workspace.onDidSaveTextDocument((document) => {
+        if (this.externalEditSessions.has(document.uri.fsPath)) {
+          void this.applyExternalEdit(document);
+          return;
+        }
         this.scheduleRefresh(document.uri);
       }),
       vscode.workspace.onDidCreateFiles((event) => {
@@ -246,6 +256,10 @@ export class RepositoryManager implements vscode.Disposable {
     command('svnLens.acceptTheirs', (uri?: vscode.Uri) => this.resolveConflict(uri, 'theirs-full'));
     command('svnLens.markResolved', (uri?: vscode.Uri) => this.markResolved(uri));
     command('svnLens.openConflictDiff', (uri?: vscode.Uri) => this.openConflictDiff(uri));
+    command('svnLens.openExternalUrl', (item?: ExternalTreeItem) => this.openExternalUrl(item));
+    command('svnLens.revealExternalOwner', (item?: ExternalTreeItem) => this.revealExternalOwner(item));
+    command('svnLens.editExternalDefinition', (item?: ExternalTreeItem) => this.editExternalDefinition(item));
+    command('svnLens.updateExternalRevision', (item?: ExternalTreeItem) => this.updateExternalRevision(item));
     command('svnLens.openSelectedRevisionPath', (item?: RevisionDetailsItem) => this.openSelectedRevisionPath(item));
     command('svnLens.filterSelectedRevisionFiles', () => this.filterSelectedRevisionFiles());
     command('svnLens.clearSelectedRevisionFilesFilter', () => this.clearSelectedRevisionFilesFilter());
@@ -281,6 +295,7 @@ export class RepositoryManager implements vscode.Disposable {
 
     this.repoBrowserProvider.refresh();
     this.branchTreeProvider.refresh();
+    this.externalTreeProvider.refresh();
     this.actionTreeProvider.refresh();
     if (this.selectedRevision && !this.repositories.has(this.selectedRevision.repository.rootUri.fsPath)) {
       this.setSelectedRevision(undefined);
@@ -305,6 +320,7 @@ export class RepositoryManager implements vscode.Disposable {
     }
     this.repoBrowserProvider.refresh();
     this.branchTreeProvider.refresh();
+    this.externalTreeProvider.refresh();
     this.actionTreeProvider.refresh();
     this.updateStatusBar();
   }
@@ -721,5 +737,83 @@ export class RepositoryManager implements vscode.Disposable {
   private async clearSelectedRevisionFilesFilter(): Promise<void> {
     this.revisionDetailsProvider.setActionFilter('all');
     void vscode.window.showInformationMessage('Revision file filter cleared.');
+  }
+
+  private async updateExternalRevision(item?: ExternalTreeItem): Promise<void> {
+    if (!item?.repository || !item.external) {
+      void vscode.window.showInformationMessage('Select an external entry first.');
+      return;
+    }
+
+    const value = await vscode.window.showInputBox({
+      title: `Update external revision for ${item.external.target}`,
+      prompt: item.external.url,
+      value: item.external.operativeRevision ?? '',
+      validateInput: (input) => (/^\d+$/.test(input.trim()) ? undefined : 'Enter a numeric revision.'),
+    });
+    if (value === undefined) {
+      return;
+    }
+
+    await item.repository.updateExternalRevision(item.external, value.trim());
+    this.externalTreeProvider.refresh();
+    void vscode.window.showInformationMessage(`External ${item.external.target} updated to r${value.trim()}.`);
+  }
+
+  private async openExternalUrl(item?: ExternalTreeItem): Promise<void> {
+    if (!item?.repository || !item.external) {
+      void vscode.window.showInformationMessage('Select an external entry first.');
+      return;
+    }
+
+    const url = await item.repository.resolveExternalUrl(item.external);
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+  }
+
+  private async revealExternalOwner(item?: ExternalTreeItem): Promise<void> {
+    if (!item?.repository) {
+      void vscode.window.showInformationMessage('Select an external definition first.');
+      return;
+    }
+
+    const ownerPath = item.external?.ownerAbsolutePath
+      ?? (item.ownerRelativePath && item.ownerRelativePath !== '.'
+        ? path.join(item.repository.rootUri.fsPath, item.ownerRelativePath)
+        : item.repository.rootUri.fsPath);
+    await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(ownerPath));
+  }
+
+  private async editExternalDefinition(item?: ExternalTreeItem): Promise<void> {
+    const repository = item?.repository;
+    if (!repository) {
+      void vscode.window.showInformationMessage('Select an external definition or owner directory first.');
+      return;
+    }
+
+    const ownerRelativePath = item.external?.ownerRelativePath ?? item.ownerRelativePath;
+    const rawText = await repository.getExternalPropertyText(ownerRelativePath);
+    const editsDirectory = path.join(this.context.globalStorageUri.fsPath, 'externals-edits');
+    await fs.mkdir(editsDirectory, { recursive: true });
+
+    const safeRepo = Buffer.from(repository.rootUri.fsPath).toString('hex').slice(0, 16);
+    const safeOwner = Buffer.from((ownerRelativePath && ownerRelativePath !== '.' ? ownerRelativePath : 'root')).toString('hex').slice(0, 16);
+    const editPath = path.join(editsDirectory, `${safeRepo}-${safeOwner}.svnexternals.txt`);
+    await fs.writeFile(editPath, rawText, 'utf8');
+    this.externalEditSessions.set(editPath, { repository, ownerRelativePath });
+
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(editPath));
+    await vscode.window.showTextDocument(document, { preview: false });
+    void vscode.window.showInformationMessage('Edit the svn:externals text and save the file to apply it.');
+  }
+
+  private async applyExternalEdit(document: vscode.TextDocument): Promise<void> {
+    const session = this.externalEditSessions.get(document.uri.fsPath);
+    if (!session) {
+      return;
+    }
+
+    await session.repository.setExternalPropertyText(session.ownerRelativePath, document.getText());
+    this.externalTreeProvider.refresh();
+    void vscode.window.showInformationMessage(`Applied svn:externals for ${session.ownerRelativePath && session.ownerRelativePath !== '.' ? session.ownerRelativePath : 'root'}.`);
   }
 }

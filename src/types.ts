@@ -67,9 +67,27 @@ export interface SvnListEntry {
   date?: string;
 }
 
+export interface SvnPropertyValue {
+  path: string;
+  name: string;
+  value: string;
+}
+
+export interface SvnExternalDefinition {
+  ownerRelativePath: string;
+  ownerAbsolutePath: string;
+  rawLine: string;
+  lineIndex: number;
+  target: string;
+  url: string;
+  operativeRevision?: string;
+}
+
 export interface LogQuery {
   page: number;
   pageSize: number;
+  revision?: number;
+  keyword?: string;
   author?: string;
   from?: string;
   to?: string;

@@ -226,6 +226,17 @@ export class LogCache implements vscode.Disposable {
     const where: string[] = ['scope_id = ?'];
     const params: Array<string | number> = [scopeId];
 
+    if (typeof query.revision === 'number' && Number.isFinite(query.revision) && query.revision > 0) {
+      where.push('revision = ?');
+      params.push(query.revision);
+    }
+
+    if (query.keyword) {
+      where.push('(LOWER(message) LIKE ? OR LOWER(author) LIKE ? OR CAST(revision AS TEXT) LIKE ?)');
+      const keyword = `%${query.keyword.toLowerCase()}%`;
+      params.push(keyword, keyword, keyword);
+    }
+
     if (query.author) {
       where.push('LOWER(author) LIKE ?');
       params.push(`%${query.author.toLowerCase()}%`);
@@ -306,6 +317,16 @@ export class LogCache implements vscode.Disposable {
   }
 
   private matchesQuery(entry: SvnLogEntry, query: LogQuery): boolean {
+    if (typeof query.revision === 'number' && Number.isFinite(query.revision) && query.revision > 0 && entry.revision !== query.revision) {
+      return false;
+    }
+    if (query.keyword) {
+      const needle = query.keyword.toLowerCase();
+      const haystacks = [entry.message, entry.author, String(entry.revision)].map((value) => value.toLowerCase());
+      if (!haystacks.some((value) => value.includes(needle))) {
+        return false;
+      }
+    }
     if (query.author && !entry.author.toLowerCase().includes(query.author.toLowerCase())) {
       return false;
     }

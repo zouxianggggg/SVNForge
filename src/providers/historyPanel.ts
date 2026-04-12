@@ -28,7 +28,8 @@ interface PanelEntrySummary {
   author: string;
   date: string;
   message: string;
-  changedPathCount: number;
+  changedPathCount?: number;
+  detailsLoaded: boolean;
   previewPaths: PanelEntryPreviewPath[];
   firstPath?: string;
   copyNote?: string;
@@ -37,6 +38,7 @@ interface PanelEntrySummary {
 interface PanelPagePayload {
   type: 'page';
   requestId?: number;
+  append?: boolean;
   page: number;
   pageSize: number;
   hasMore: boolean;
@@ -46,6 +48,8 @@ interface PanelPagePayload {
   detailsHtml: string;
   resultLabel: string;
   selectedRevision?: number;
+  selectedPreviousRevision?: number;
+  selectedDetailsLoaded?: boolean;
   filePath?: string;
   error?: string;
 }
@@ -119,11 +123,14 @@ export class HistoryPanel {
 
     panel.webview.onDidReceiveMessage(async (message: Record<string, unknown>) => {
       if (message.type === 'query') {
+        const parsedRevision = this.parseRevisionFilter(message.revision);
         await this.sendPage(panel, state, Number(message.page ?? 0), {
+          revision: parsedRevision,
+          keyword: typeof message.keyword === 'string' ? message.keyword.trim() || undefined : undefined,
           author: typeof message.author === 'string' ? message.author : undefined,
           from: typeof message.from === 'string' ? message.from : undefined,
           to: typeof message.to === 'string' ? message.to : undefined,
-        }, typeof message.requestId === 'number' ? message.requestId : undefined);
+        }, typeof message.requestId === 'number' ? message.requestId : undefined, message.append === true);
       }
 
       if (message.type === 'compare' && typeof state.filePath === 'string') {
@@ -154,27 +161,32 @@ export class HistoryPanel {
     panel: vscode.WebviewPanel,
     state: PanelState,
     page: number,
-    filters: { author?: string; from?: string; to?: string } | undefined,
+    filters: { revision?: number; keyword?: string; author?: string; from?: string; to?: string } | undefined,
     requestId?: number,
+    append = false,
   ): Promise<void> {
     const startedAt = Date.now();
-    const payload = await this.getPagePayload(state, page, filters, requestId);
+    const payload = await this.getPagePayload(state, page, filters, requestId, append);
     payload.resultLabel = `${payload.resultLabel} · ${Date.now() - startedAt} ms`;
     await panel.webview.postMessage(payload);
-    await this.syncSelectionFromPayload(state, payload);
+    if (!append) {
+      await this.syncSelectionFromPayload(state, payload);
+    }
   }
 
   private async getPagePayload(
     state: PanelState,
     page: number,
-    filters: { author?: string; from?: string; to?: string } | undefined,
+    filters: { revision?: number; keyword?: string; author?: string; from?: string; to?: string } | undefined,
     requestId?: number,
+    append = false,
   ): Promise<PanelPagePayload> {
     const repository = this.resolveRepository(vscode.Uri.parse(state.repositoryRoot));
     if (!repository) {
       return {
         type: 'page',
         requestId,
+        append,
         page,
         pageSize: 0,
         hasMore: false,
@@ -184,6 +196,8 @@ export class HistoryPanel {
         detailsHtml: '当前工作区没有可用的 SVN 仓库。',
         resultLabel: '未找到 SVN 仓库',
         selectedRevision: undefined,
+        selectedPreviousRevision: undefined,
+        selectedDetailsLoaded: false,
         filePath: state.filePath,
         error: '当前工作区没有可用的 SVN 仓库。',
       };
@@ -192,7 +206,9 @@ export class HistoryPanel {
     try {
       const query: LogQuery = {
         page,
-        pageSize: Math.min(25, getLogPageSize(repository.rootUri)),
+        pageSize: Math.min(20, getLogPageSize(repository.rootUri), 20),
+        revision: filters?.revision,
+        keyword: filters?.keyword,
         author: filters?.author,
         from: filters?.from,
         to: filters?.to,
@@ -201,32 +217,43 @@ export class HistoryPanel {
         state.mode === 'file' && state.filePath
           ? await repository.getFileHistory(vscode.Uri.file(state.filePath), query)
           : await repository.getLogPage(query);
-      this.primeEntryCache(state, result.entries);
+      this.primeEntryCache(state, result.entries, append);
       const summaries = result.entries.map((entry) => this.toPanelEntrySummary(entry));
-      const selectedRevision = result.entries[0]?.revision;
-      state.selectedRevision = selectedRevision;
+      const selectedRevision = append ? state.selectedRevision : result.entries[0]?.revision;
+      const selectedPreviousRevision = append
+        ? state.entryCache.get(selectedRevision ?? -1)?.previousRevision
+        : result.entries[1]?.revision;
+      if (!append) {
+        state.selectedRevision = selectedRevision;
+      }
 
       return {
         type: 'page',
         requestId,
+        append,
         page: result.page,
         pageSize: result.pageSize,
         hasMore: result.hasMore,
         mode: state.mode,
         entries: summaries,
         listHtml: this.renderListHtml(summaries, state.mode),
-        detailsHtml: this.renderDetailsHtml(result.entries[0], state.mode, result.entries[1]?.revision),
+        detailsHtml: this.renderDetailsHtml(result.entries[0], state.mode, selectedPreviousRevision),
         resultLabel: this.buildResultLabel(state.mode, result.page, result.entries.length, result.hasMore),
         selectedRevision,
+        selectedPreviousRevision,
+        selectedDetailsLoaded: !!result.entries[0]?.detailsLoaded,
         filePath: state.filePath,
         error: undefined,
       };
     } catch (error) {
-      state.entryCache.clear();
-      state.selectedRevision = undefined;
+      if (!append) {
+        state.entryCache.clear();
+        state.selectedRevision = undefined;
+      }
       return {
         type: 'page',
         requestId,
+        append,
         page,
         pageSize: getLogPageSize(repository.rootUri),
         hasMore: false,
@@ -236,6 +263,8 @@ export class HistoryPanel {
         detailsHtml: error instanceof Error ? error.message : String(error),
         resultLabel: '加载失败',
         selectedRevision: undefined,
+        selectedPreviousRevision: undefined,
+        selectedDetailsLoaded: false,
         filePath: state.filePath,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -266,7 +295,7 @@ export class HistoryPanel {
       const target = state.mode === 'file' && state.filePath ? vscode.Uri.file(state.filePath) : undefined;
       const cached = state.entryCache.get(revision);
       const resolvedPreviousRevision = previousRevision ?? cached?.previousRevision;
-      const detail = cached?.entry ?? (await repository.getRevisionLog(revision, target));
+      const detail = cached?.entry.detailsLoaded ? cached.entry : await repository.getRevisionLog(revision, target);
       if (!detail) {
         await panel.webview.postMessage({
           type: 'details',
@@ -316,7 +345,8 @@ export class HistoryPanel {
       author: entry.author,
       date: entry.date,
       message: entry.message,
-      changedPathCount: entry.changedPaths.length,
+      changedPathCount: entry.detailsLoaded ? entry.changedPaths.length : undefined,
+      detailsLoaded: !!entry.detailsLoaded,
       previewPaths,
       firstPath: entry.changedPaths[0]?.path,
       copyNote: copied
@@ -345,6 +375,7 @@ export class HistoryPanel {
 
         if (mode === 'graph') {
           const lane = this.getLane(entry);
+          const countLabel = entry.detailsLoaded ? `${entry.changedPathCount ?? 0} paths` : '详情按需加载';
           return [
             `<div class="entry graph-mode" ${attrs}>`,
             '<div class="rail">',
@@ -353,27 +384,31 @@ export class HistoryPanel {
             '</div>',
             '<div>',
             '<div class="entry-header">',
-            `<div class="graph"><strong>r${entry.revision}</strong><span class="entry-count">${entry.changedPathCount} paths</span></div>`,
+            `<div class="graph"><strong>r${entry.revision}</strong><span class="entry-count">${this.escapeHtml(countLabel)}</span></div>`,
             `<span class="entry-meta">${this.escapeHtml(entry.author)} · ${this.escapeHtml(entry.date || '')}</span>`,
             '</div>',
             `<div class="entry-subject">${this.escapeHtml(this.getMessageSubject(entry.message) || 'No commit message')}</div>`,
             `<div class="entry-body">${this.escapeHtml(this.getMessageExcerpt(entry.message))}</div>`,
-            `<div class="chips">${this.renderChipsHtml(entry.previewPaths)}</div>`,
+            entry.previewPaths.length > 0 ? `<div class="chips">${this.renderChipsHtml(entry.previewPaths)}</div>` : '<div class="entry-meta">点击查看完整文件变更</div>',
             entry.copyNote ? `<div class="copy-note">${this.escapeHtml(entry.copyNote)}</div>` : '',
+            `<div class="entry-inline-details hidden" data-inline-details="${entry.revision}"></div>`,
             '</div>',
             '</div>',
           ].join('');
         }
 
+        const countLabel = entry.detailsLoaded ? `${entry.changedPathCount ?? 0} files` : '详情按需加载';
+
         return [
           `<div class="entry" ${attrs}>`,
           '<div class="entry-header">',
-          `<div class="graph"><span class="dot"></span><strong>r${entry.revision}</strong><span class="entry-count">${entry.changedPathCount} files</span></div>`,
+          `<div class="graph"><span class="dot"></span><strong>r${entry.revision}</strong><span class="entry-count">${this.escapeHtml(countLabel)}</span></div>`,
           `<span class="entry-meta">${this.escapeHtml(entry.author)} · ${this.escapeHtml(entry.date || '')}</span>`,
           '</div>',
           `<div class="entry-subject">${this.escapeHtml(this.getMessageSubject(entry.message) || 'No commit message')}</div>`,
           `<div class="entry-body">${this.escapeHtml(this.getMessageExcerpt(entry.message))}</div>`,
-          entry.previewPaths.length > 0 ? `<div class="chips">${this.renderChipsHtml(entry.previewPaths)}</div>` : '',
+          entry.previewPaths.length > 0 ? `<div class="chips">${this.renderChipsHtml(entry.previewPaths)}</div>` : '<div class="entry-meta">点击查看完整文件变更</div>',
+          `<div class="entry-inline-details hidden" data-inline-details="${entry.revision}"></div>`,
           '</div>',
         ].join('');
       })
@@ -392,6 +427,19 @@ export class HistoryPanel {
   private renderDetailsHtml(entry: SvnLogEntry | undefined, mode: PanelState['mode'], previousRevision?: number): string {
     if (!entry) {
       return '<div class="empty-state details-empty">当前筛选条件下没有可显示的提交记录。</div>';
+    }
+
+    if (!entry.detailsLoaded) {
+      return [
+        '<div class="details-card">',
+        '<div class="details-header">',
+        `<div class="details-title"><span class="revision-pill">r${entry.revision}</span><strong>${this.escapeHtml(this.getMessageSubject(entry.message) || 'No commit message')}</strong></div>`,
+        `<div class="entry-meta">${this.escapeHtml(entry.author)} · ${this.escapeHtml(entry.date || '')}</div>`,
+        '</div>',
+        `<div class="details-message">${this.escapeHtml(entry.message || 'No commit message').replace(/\n/g, '<br />')}</div>`,
+        '<div class="empty-state details-empty">正在按需加载该 revision 的文件变更信息...</div>',
+        '</div>',
+      ].join('');
     }
 
     const compareButton =
@@ -418,8 +466,10 @@ export class HistoryPanel {
     ].join('');
   }
 
-  private primeEntryCache(state: PanelState, entries: readonly SvnLogEntry[]): void {
-    state.entryCache.clear();
+  private primeEntryCache(state: PanelState, entries: readonly SvnLogEntry[], append = false): void {
+    if (!append) {
+      state.entryCache.clear();
+    }
     entries.forEach((entry, index) => {
       state.entryCache.set(entry.revision, {
         entry,
@@ -431,6 +481,24 @@ export class HistoryPanel {
   private buildResultLabel(mode: PanelState['mode'], page: number, count: number, hasMore: boolean): string {
     const modeLabel = mode === 'graph' ? 'Graph' : mode === 'file' ? 'File History' : 'Log';
     return `${modeLabel} · 第 ${page + 1} 页 · ${count} 条${hasMore ? '，可继续翻页' : ''}`;
+  }
+
+  private parseRevisionFilter(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.trunc(value);
+    }
+
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.trim().replace(/^r/i, '');
+    if (!/^\d+$/.test(normalized)) {
+      return undefined;
+    }
+
+    const revision = Number(normalized);
+    return Number.isFinite(revision) && revision > 0 ? revision : undefined;
   }
 
   private pushRevisionSelection(
@@ -496,16 +564,21 @@ export class HistoryPanel {
       return;
     }
 
-    const cached = state.entryCache.get(revision)?.entry;
+    const cacheItem = state.entryCache.get(revision);
+    const cached = cacheItem?.entry;
     const previousRevision = state.entryCache.get(revision)?.previousRevision ?? payload.entries[1]?.revision;
-    const entry = cached;
-    if (!entry) {
+    if (!cached) {
+      this.onDidSelectRevision(undefined);
+      return;
+    }
+
+    if (!cached.detailsLoaded) {
       this.onDidSelectRevision(undefined);
       return;
     }
 
     state.selectedRevision = revision;
-    this.pushRevisionSelection(repository, state, entry, previousRevision);
+    this.pushRevisionSelection(repository, state, cached, previousRevision);
   }
 
   private renderHtml(title: string, initialPage: PanelPagePayload): string {
@@ -606,7 +679,7 @@ export class HistoryPanel {
     }
     .toolbar {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
+      grid-template-columns: minmax(120px, 0.9fr) minmax(180px, 1.2fr) minmax(140px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) auto auto;
       gap: 10px;
     }
     .toolbar input, .toolbar button, .pager button {
@@ -634,10 +707,7 @@ export class HistoryPanel {
       opacity: 0.55;
     }
     .content {
-      display: grid;
-      grid-template-columns: minmax(340px, 0.95fr) minmax(320px, 1.05fr);
-      gap: 12px;
-      align-items: start;
+      display: block;
     }
     .pane {
       min-height: 540px;
@@ -790,6 +860,11 @@ export class HistoryPanel {
       color: var(--muted);
       font-size: 12px;
     }
+    .entry-inline-details {
+      margin-top: 2px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
     .details {
       padding: 12px;
       overflow: auto;
@@ -864,6 +939,16 @@ export class HistoryPanel {
     .path-text {
       word-break: break-word;
       line-height: 1.45;
+    }
+    .pager {
+      display: flex;
+      gap: 10px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card-bg) 84%, transparent);
+    }
+    .pager button {
+      flex: 1;
     }
     .details-actions {
       margin-top: -2px;
@@ -955,15 +1040,12 @@ export class HistoryPanel {
       from { background-position: 200% 0; }
       to { background-position: -200% 0; }
     }
-    @media (max-width: 900px) {
+    @media (max-width: 760px) {
       .hero {
         display: grid;
       }
       .toolbar {
         grid-template-columns: 1fr 1fr;
-      }
-      .content {
-        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -980,6 +1062,8 @@ export class HistoryPanel {
         <div id="resultMeta" class="pane-meta"></div>
       </div>
       <div class="toolbar">
+        <input id="revision" placeholder="版本号，例如 r12345" />
+        <input id="keyword" placeholder="关键字，例如 bugfix" />
         <input id="author" placeholder="作者过滤" />
         <input id="from" placeholder="开始时间，例如 2024-01-01" />
         <input id="to" placeholder="结束时间，例如 2024-12-31" />
@@ -988,7 +1072,7 @@ export class HistoryPanel {
       </div>
     </div>
     <div class="content">
-      <section class="pane">
+      <section class="pane" id="listPane">
         <div class="pane-header">
           <div class="pane-title">Revisions</div>
           <div id="listMeta" class="pane-meta"></div>
@@ -1002,13 +1086,6 @@ export class HistoryPanel {
           <button id="next">下一页</button>
         </div>
       </section>
-      <section class="pane">
-        <div class="pane-header">
-          <div class="pane-title">Details</div>
-          <div id="detailsMeta" class="pane-meta"></div>
-        </div>
-        <div id="details" class="details">选择一条提交记录以查看详细信息。</div>
-      </section>
     </div>
   </div>
   <script nonce="${nonce}">
@@ -1020,7 +1097,9 @@ export class HistoryPanel {
     let latestDetailRequestId = 0;
     let currentSelectionRevision = Number(initialPage.selectedRevision || 0);
     const list = document.getElementById('list');
-    const details = document.getElementById('details');
+    const listPane = document.getElementById('listPane');
+    const revision = document.getElementById('revision');
+    const keyword = document.getElementById('keyword');
     const author = document.getElementById('author');
     const from = document.getElementById('from');
     const to = document.getElementById('to');
@@ -1032,7 +1111,6 @@ export class HistoryPanel {
     const statusText = document.getElementById('statusText');
     const resultMeta = document.getElementById('resultMeta');
     const listMeta = document.getElementById('listMeta');
-    const detailsMeta = document.getElementById('detailsMeta');
     const busyOverlay = document.getElementById('busyOverlay');
     const busyText = document.getElementById('busyText');
 
@@ -1055,6 +1133,8 @@ export class HistoryPanel {
 
     function syncControls() {
       const queryBusy = busyOverlay && !busyOverlay.classList.contains('hidden');
+      revision.disabled = queryBusy;
+      keyword.disabled = queryBusy;
       author.disabled = queryBusy;
       from.disabled = queryBusy;
       to.disabled = queryBusy;
@@ -1072,20 +1152,32 @@ export class HistoryPanel {
     }
 
     function setDetailsBusy(message) {
-      details.innerHTML = renderSkeleton();
-      detailsMeta.textContent = message;
+      const container = getInlineDetailsContainer(currentSelectionRevision);
+      if (container) {
+        container.classList.remove('hidden');
+        container.innerHTML = renderSkeleton();
+      }
       setStatus(message, true);
+    }
+
+    function revealSelection() {
+      const selected = list.querySelector('[data-revision].is-selected');
+      if (!selected) {
+        return;
+      }
+      selected.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     function query(page) {
       currentPage = Math.max(0, page);
       latestQueryRequestId += 1;
       setQueryBusy(true, '正在加载提交记录...');
-      detailsMeta.textContent = '等待列表结果';
       vscode.postMessage({
         type: 'query',
         requestId: latestQueryRequestId,
         page: currentPage,
+        revision: revision.value,
+        keyword: keyword.value,
         author: author.value,
         from: from.value,
         to: to.value
@@ -1096,12 +1188,17 @@ export class HistoryPanel {
       latestPage = { ...latestPage, entries: message.entries || [], mode: message.mode, filePath: message.filePath, error: message.error, hasMore: !!message.hasMore };
       currentSelectionRevision = Number(message.selectedRevision || 0);
       list.innerHTML = message.listHtml || '';
-      details.innerHTML = message.detailsHtml || '当前筛选条件下没有可显示的提交记录。';
       resultMeta.textContent = message.resultLabel || '';
       listMeta.textContent = message.resultLabel || '';
-      detailsMeta.textContent = currentSelectionRevision ? ('当前选中 r' + currentSelectionRevision) : '没有选中 revision';
       setQueryBusy(false, message.error ? ('加载失败：' + message.error) : (message.resultLabel || '加载完成'));
       updateSelectionState();
+
+      if (!message.error && currentSelectionRevision && !message.selectedDetailsLoaded) {
+        const selectedElement = list.querySelector('[data-revision="' + currentSelectionRevision + '"]');
+        if (selectedElement) {
+          requestDetailsFromElement(selectedElement);
+        }
+      }
     }
 
     function requestDetailsFromElement(element) {
@@ -1115,6 +1212,13 @@ export class HistoryPanel {
       updateSelectionState();
       setDetailsBusy('正在加载 r' + revision + ' 详情...');
       vscode.postMessage({ type: 'details', requestId: latestDetailRequestId, revision, previousRevision });
+    }
+
+    function getInlineDetailsContainer(revision) {
+      if (!revision) {
+        return null;
+      }
+      return list.querySelector('[data-inline-details="' + revision + '"]');
     }
 
     function closestElement(target, selector) {
@@ -1142,9 +1246,13 @@ export class HistoryPanel {
         if (typeof message.requestId === 'number' && message.requestId !== latestDetailRequestId) {
           return;
         }
-        details.innerHTML = message.html || ('加载详情失败：' + (message.error || '未知错误'));
-        detailsMeta.textContent = message.summary || (message.error ? '加载失败' : '详情已更新');
+        const container = getInlineDetailsContainer(message.revision);
+        if (container) {
+          container.classList.remove('hidden');
+          container.innerHTML = message.html || ('加载详情失败：' + (message.error || '未知错误'));
+        }
         setStatus(message.error ? ('加载失败：' + message.error) : (message.summary || '详情已更新'), false);
+        revealSelection();
         updateSelectionState();
       }
     });
@@ -1154,7 +1262,14 @@ export class HistoryPanel {
         const revision = Number(item.dataset.revision || 0);
         item.classList.toggle('is-selected', revision === currentSelectionRevision);
       });
-      detailsMeta.textContent = currentSelectionRevision ? ('当前选中 r' + currentSelectionRevision) : '没有选中 revision';
+      list.querySelectorAll('[data-inline-details]').forEach((item) => {
+        const revision = Number(item.dataset.inlineDetails || 0);
+        if (revision === currentSelectionRevision) {
+          item.classList.remove('hidden');
+        } else {
+          item.classList.add('hidden');
+        }
+      });
       syncControls();
     }
 
@@ -1173,7 +1288,7 @@ export class HistoryPanel {
       }
     });
 
-    details.addEventListener('click', (event) => {
+    list.addEventListener('click', (event) => {
       const target = closestElement(event.target, '[data-action="compare"]');
       if (!target) {
         return;
@@ -1186,12 +1301,21 @@ export class HistoryPanel {
     });
 
     applyButton.addEventListener('click', () => query(0));
-    reloadButton.addEventListener('click', () => query(currentPage));
+    reloadButton.addEventListener('click', () => query(0));
     prevButton.addEventListener('click', () => query(Math.max(0, currentPage - 1)));
     nextButton.addEventListener('click', () => {
       if (latestPage.hasMore) {
         query(currentPage + 1);
       }
+    });
+
+    [revision, keyword, author, from, to].forEach((input) => {
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          query(0);
+        }
+      });
     });
 
     applyPage(initialPage);

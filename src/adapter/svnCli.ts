@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { getSvnExecutable } from '../config';
-import { SvnBlameLine, SvnInfo, SvnListEntry, SvnLogEntry, SvnStatusEntry } from '../types';
+import { SvnBlameLine, SvnInfo, SvnListEntry, SvnLogEntry, SvnPropertyValue, SvnStatusEntry } from '../types';
 import { execFileText } from '../utils/process';
-import { parseBlameXml, parseInfoXml, parseListXml, parseLogXml, parseStatusXml } from './xml';
+import { parseBlameXml, parseInfoXml, parseListXml, parseLogXml, parsePropertyGetXml, parseStatusXml } from './xml';
 
 export interface SvnLogOptions {
   revisionRange?: string;
@@ -158,6 +158,11 @@ export class SvnCli {
   public async propGet(cwd: string, propName: string, target: string): Promise<string> {
     const { stdout } = await this.run(['propget', propName, target], cwd);
     return stdout.trim();
+  }
+
+  public async propGetRecursive(cwd: string, propName: string, target = '.'): Promise<SvnPropertyValue[]> {
+    const { stdout } = await this.run(['propget', propName, target, '--recursive', '--xml'], cwd);
+    return parsePropertyGetXml(stdout);
   }
 
   public async propSet(cwd: string, propName: string, value: string, target: string): Promise<void> {

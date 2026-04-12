@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import { SvnBlameLine, SvnInfo, SvnListEntry, SvnLogEntry, SvnStatusEntry, SvnStatusKind } from '../types';
+import { SvnBlameLine, SvnInfo, SvnListEntry, SvnLogEntry, SvnPropertyValue, SvnStatusEntry, SvnStatusKind } from '../types';
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -137,4 +137,22 @@ export function parseBlameXml(xml: string): SvnBlameLine[] {
     }
   }
   return lines;
+}
+
+export function parsePropertyGetXml(xml: string): SvnPropertyValue[] {
+  const root = parser.parse(xml);
+  const targets = asArray(root?.properties?.target);
+  const entries: SvnPropertyValue[] = [];
+
+  for (const target of targets) {
+    for (const property of asArray(target?.property)) {
+      entries.push({
+        path: String(target?.path ?? ''),
+        name: String(property?.name ?? ''),
+        value: String(property?.['#text'] ?? ''),
+      });
+    }
+  }
+
+  return entries;
 }

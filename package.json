@@ -23,7 +23,7 @@
     "vscode": "^1.96.0"
   },
   "categories": [
-    "SCM",
+    "SCM Providers",
     "Other"
   ],
   "keywords": [
@@ -36,20 +36,7 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "workspaceContains:.svn",
-    "onView:svnLens.actions",
-    "onView:svnLens.revisionDetails",
-    "onView:svnLens.repoBrowser",
-    "onView:svnLens.branches",
-    "onCommand:svnLens.checkout",
-    "onCommand:svnLens.import",
-    "onCommand:svnLens.refresh",
-    "onCommand:svnLens.update",
-    "onCommand:svnLens.commit",
-    "onCommand:svnLens.switch",
-    "onCommand:svnLens.showLog",
-    "onCommand:svnLens.showFileHistory",
-    "onCommand:svnLens.toggleBlame"
+    "workspaceContains:.svn"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -131,19 +118,28 @@
       "scm": [
         {
           "id": "svnLens.actions",
-          "name": "Actions"
+          "name": "Actions",
+          "icon": "media/icon.svg"
         },
         {
           "id": "svnLens.revisionDetails",
-          "name": "Selected Revision"
+          "name": "Selected Revision",
+          "icon": "media/icon.svg"
+        },
+        {
+          "id": "svnLens.externals",
+          "name": "Externals",
+          "icon": "media/icon.svg"
         },
         {
           "id": "svnLens.repoBrowser",
-          "name": "Repository Browser"
+          "name": "Repository Browser",
+          "icon": "media/icon.svg"
         },
         {
           "id": "svnLens.branches",
-          "name": "Branches & Tags"
+          "name": "Branches & Tags",
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -253,6 +249,22 @@
         "title": "SVN: Open Conflict Diff"
       },
       {
+        "command": "svnLens.updateExternalRevision",
+        "title": "SVN: Update External Revision"
+      },
+      {
+        "command": "svnLens.openExternalUrl",
+        "title": "SVN: Open External URL"
+      },
+      {
+        "command": "svnLens.revealExternalOwner",
+        "title": "SVN: Reveal External Owner"
+      },
+      {
+        "command": "svnLens.editExternalDefinition",
+        "title": "SVN: Edit svn:externals Definition"
+      },
+      {
         "command": "svnLens.filterSelectedRevisionFiles",
         "title": "SVN: Filter Selected Revision Files"
       },
@@ -313,7 +325,7 @@
       "view/title": [
         {
           "command": "svnLens.refresh",
-          "when": "view == svnLens.repoBrowser || view == svnLens.branches || view == svnLens.actions || view == svnLens.revisionDetails",
+          "when": "view == svnLens.repoBrowser || view == svnLens.branches || view == svnLens.actions || view == svnLens.revisionDetails || view == svnLens.externals",
           "group": "navigation@1"
         },
         {
@@ -347,6 +359,26 @@
           "command": "svnLens.createBranch",
           "when": "view == svnLens.branches && viewItem == repositoryRoot",
           "group": "navigation@1"
+        },
+        {
+          "command": "svnLens.updateExternalRevision",
+          "when": "view == svnLens.externals && viewItem == external",
+          "group": "inline@1"
+        },
+        {
+          "command": "svnLens.openExternalUrl",
+          "when": "view == svnLens.externals && viewItem == external",
+          "group": "inline@2"
+        },
+        {
+          "command": "svnLens.revealExternalOwner",
+          "when": "view == svnLens.externals && (viewItem == owner || viewItem == external)",
+          "group": "inline@3"
+        },
+        {
+          "command": "svnLens.editExternalDefinition",
+          "when": "view == svnLens.externals && (viewItem == owner || viewItem == external)",
+          "group": "inline@4"
         },
         {
           "command": "svnLens.createTag",
