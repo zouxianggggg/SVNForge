@@ -625,7 +625,7 @@ export class SvnRepository implements vscode.Disposable {
   }
 
   private async ensureLogCoverage(scopeId: string, targetPath: string, query: LogQuery): Promise<void> {
-    const desiredEntries = (query.page + 1) * query.pageSize;
+    const desiredEntries = (query.page + 1) * query.pageSize + 1;
     let currentPage = await this.logCache.query(scopeId, {
       ...query,
       page: 0,
@@ -672,7 +672,7 @@ export class SvnRepository implements vscode.Disposable {
   }
 
   private async fetchLiveLogPage(scopeId: string, targetPath: string, query: LogQuery): Promise<LogPage> {
-    const desiredEntries = (query.page + 1) * query.pageSize;
+    const desiredEntries = (query.page + 1) * query.pageSize + 1;
     const collected = new Map<number, SvnLogEntry>();
     let nextRevision = await this.getHeadRevision(targetPath);
     let fetchWindow = 0;
